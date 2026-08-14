@@ -435,18 +435,19 @@ class TestTalentMarketKeepalive:
     async def test_ping_success(self):
         mock_tm = MagicMock()
         mock_tm.connected = True
-        mock_tm._session.send_ping = AsyncMock()
+        mock_tm.ping = AsyncMock()
         with patch("onemancompany.agents.recruitment.talent_market", mock_tm), \
              patch("onemancompany.agents.recruitment.start_talent_market", AsyncMock()):
             from onemancompany.core.system_cron import talent_market_keepalive
             result = await talent_market_keepalive()
+        mock_tm.ping.assert_awaited_once_with()
         assert result is None
 
     @pytest.mark.asyncio
     async def test_ping_fail_reconnect_success(self):
         mock_tm = MagicMock()
         mock_tm.connected = True
-        mock_tm._session.send_ping = AsyncMock(side_effect=ConnectionError("lost"))
+        mock_tm.ping = AsyncMock(side_effect=ConnectionError("lost"))
         mock_tm._reconnect = AsyncMock()
         with patch("onemancompany.agents.recruitment.talent_market", mock_tm), \
              patch("onemancompany.agents.recruitment.start_talent_market", AsyncMock()):
@@ -459,7 +460,7 @@ class TestTalentMarketKeepalive:
     async def test_ping_fail_reconnect_fail(self):
         mock_tm = MagicMock()
         mock_tm.connected = True
-        mock_tm._session.send_ping = AsyncMock(side_effect=ConnectionError("lost"))
+        mock_tm.ping = AsyncMock(side_effect=ConnectionError("lost"))
         mock_tm._reconnect = AsyncMock(side_effect=ConnectionError("still lost"))
         with patch("onemancompany.agents.recruitment.talent_market", mock_tm), \
              patch("onemancompany.agents.recruitment.start_talent_market", AsyncMock()):

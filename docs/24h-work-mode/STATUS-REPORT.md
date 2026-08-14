@@ -1,7 +1,7 @@
 # 24 小时工作模式实施状态报告
 
 **检查日期**：2026-08-14  
-**报告版本**：4.0  
+**报告版本**：4.1
 **整体状态**：🟡 实施中，尚未正式上线
 
 > 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0 与隔离 Recovery Gate 通过，不等于真实云 Provider、正式业务服务重启、24 小时墙钟和最终 standard v2 iteration 已通过。
@@ -27,6 +27,7 @@
 - ✅ 隔离 memory-enabled 真实服务验证通过：health、readiness、在线备份、直接 integrity check 和 clean shutdown 均通过。
 - ✅ `backup-all.sh`/`restore.sh` 已统一遵守 `OMC_DATA_ROOT`；隔离离线备份和独立目标恢复演练均通过。
 - ✅ `iter_009` 未迁移、未恢复、未修改；内容哈希保持不变。
+- ✅ Talent Market MCP/SSE 已改为单一 owner task 生命周期；SSE/Session 的建立、工具调用、ping 和关闭不再跨 asyncio task。
 
 ### 1.2 本轮恢复修复
 
@@ -38,6 +39,7 @@
 - 启动时在 persisted schedule 恢复前运行 checkpoint reconciler；`OMC_RESTORE_PERSISTED_TASKS=false` 时不扫描正式 TaskTree。
 - 新增真实 subprocess crash worker：分别使用 `os._exit(87)` 和 `os._exit(88)` 模拟无 finally/close 的进程死亡。
 - P0 Gate 增加 `isolated_recovery_crash_resume_and_reconciliation` test group。
+- Talent Market 新增 task-bound context 回归测试，覆盖跨 task 关闭原始异常、call/ping owner task 路由和取消启动清理。
 
 ### 1.3 仍未完成
 
@@ -66,6 +68,7 @@
 | checkpoint 隔离 subprocess 恢复 | ✅ 通过 | `os._exit(87)` 后同 thread resume，副作用不重放 |
 | Provider 隔离 holding/resume | ✅ 通过 | 模拟 429，`os._exit(88)` 后 durable resume |
 | TaskTree/checkpoint reconciler | ✅ 通过 | resumable/missing/conflict/orphan + 第二次运行幂等 |
+| MCP/SSE 生命周期 | ✅ 本地回归通过 | owner task 统一 enter/use/exit；真实远端断线演练待完成 |
 | 真实云 Provider Gate | 🟡 待演练 | 尚未发起真实云 429/并发限制故障注入 |
 | 真实业务服务重启 Gate | 🟡 待演练 | 尚未针对新专用正式演练 iteration 执行 |
 | memory ACL/可信度 | ✅ 代码与测试通过 | 真实向量/embedding 演练仍待完成 |
@@ -82,7 +85,19 @@
 最终全量测试：
 
 ```text
-4662 passed, 5 skipped, 73 warnings in 137.13s
+4664 passed, 5 skipped, 71 warnings in 155.86s
+```
+
+本轮 MCP/SSE 相关模块回归：
+
+```text
+155 passed in 27.17s
+```
+
+完整单元测试：
+
+```text
+4628 passed, 2 skipped, 74 warnings in 152.84s
 ```
 
 隔离恢复专项：
@@ -129,6 +144,7 @@ formal launch      = false
 - `reports/PROVIDER-HOLDING-RESUME-20260814.md`
 - `reports/CHECKPOINT-RECONCILIATION-20260814.md`
 - `reports/RECOVERY-GATE-REPORT.json`
+- `reports/MCP-SSE-LIFECYCLE-20260814.md`
 
 ### 3.3 P0 Gate
 
@@ -143,20 +159,13 @@ formal_24h_launch_allowed = false
 
 恢复测试和 recovery workers 全部使用 pytest `tmp_path` 与独立 `OMC_DATA_ROOT`，测试代码没有加载正式 projects tree 或正式 Runtime SQLite。
 
-当前工作区同时存在一个从 2026-08-14 11:05:55（Asia/Shanghai）开始运行的真实后端进程：
+2026-08-14 20:07（Asia/Shanghai）本次复核时，未检测到 `python -m onemancompany.main` 后端进程。此前报告记录的 PID 32891 已不再运行；本轮未主动停止该进程。后续启动真实服务恢复演练前仍必须重新检查进程和正式数据活动，不能把一次“未运行”检查当作长期维护窗口。当前审计边界保持不变：
 
-```text
-PID 32891
-.venv/bin/python3 -m onemancompany.main
-```
-
-该服务持续写入正式 Runtime SQLite WAL 和 00003 的真实业务记录。因此，在不停服的情况下，不能把“全量测试前后正式目录 hash 完全静止”作为本轮恢复测试的证明，也不能回滚这些并发业务写入。当前审计确认：
-
-- 正式 projects tree 未因 recovery workers 创建测试项目；
+- 正式 projects tree 不由 recovery workers 创建测试项目；
 - recovery worker 的 `recovery-project` 只存在于临时 data root；
 - `iter_009` 哈希仍为固定值；
-- 未停止、覆盖、恢复或删除 PID 32891 使用的正式数据；
-- Runtime SQLite 的 WAL/SHM 变化按 concurrent live-service activity 记录，不冒充测试污染，也不擅自清理。
+- 不使用旧快照覆盖正式 Runtime SQLite；
+- 若重新出现 live-service WAL/SHM 写入，必须按 concurrent activity 单独记录，不冒充测试污染，也不擅自清理。
 
 详细说明见 `reports/FORMAL-DATA-INTEGRITY-20260814.md`。
 

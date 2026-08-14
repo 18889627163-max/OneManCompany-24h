@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -88,29 +89,29 @@ class TestTalentMarketClient:
 
         client = TalentMarketClient()
         mock_session = AsyncMock()
-        mock_session.initialize = AsyncMock()
 
-        call_count = 0
+        class Context:
+            def __init__(self, value):
+                self.value = value
 
-        async def mock_enter(cm):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return (AsyncMock(), AsyncMock())  # read, write
-            return mock_session
+            async def __aenter__(self):
+                return self.value
 
-        with patch("mcp.client.sse.sse_client", return_value=AsyncMock()):
-            with patch("onemancompany.agents.recruitment.AsyncExitStack") as MockStack:
-                mock_stack = AsyncMock()
-                mock_stack.enter_async_context = mock_enter
-                MockStack.return_value = mock_stack
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
 
-                with patch("onemancompany.agents.recruitment.ClientSession", return_value=mock_session):
-                    await client.connect("http://test/sse", "test-key")
-
-        assert client.connected
-        assert client._api_key == "test-key"
-        mock_session.initialize.assert_awaited_once()
+        with patch(
+            "mcp.client.sse.sse_client",
+            return_value=Context((AsyncMock(), AsyncMock())),
+        ), patch(
+            "onemancompany.agents.recruitment.ClientSession",
+            return_value=Context(mock_session),
+        ):
+            await client.connect("http://test/sse", "test-key")
+            assert client.connected
+            assert client._api_key == "test-key"
+            mock_session.initialize.assert_awaited_once()
+            await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_connect_already_connected_is_noop(self):
@@ -147,6 +148,117 @@ class TestTalentMarketClient:
 
         client = TalentMarketClient()
         await client.disconnect()  # Should be a noop
+        assert not client.connected
+
+    @pytest.mark.asyncio
+    async def test_sse_context_is_entered_and_exited_by_same_owner_task(self):
+        """Regression: AnyIO cancel scopes cannot be closed by another task."""
+        from onemancompany.agents.recruitment import TalentMarketClient
+
+        class TaskBoundContext:
+            def __init__(self, value):
+                self.value = value
+                self.owner = None
+
+            async def __aenter__(self):
+                self.owner = asyncio.current_task()
+                return self.value
+
+            async def __aexit__(self, exc_type, exc, tb):
+                if asyncio.current_task() is not self.owner:
+                    raise RuntimeError(
+                        "Attempted to exit cancel scope in a different task than it was entered in"
+                    )
+
+        class FakeSession:
+            def __init__(self):
+                self.call_task = None
+                self.ping_task = None
+
+            async def initialize(self):
+                return None
+
+            async def call_tool(self, tool_name, arguments):
+                self.call_task = asyncio.current_task()
+                return MagicMock(content=[])
+
+            async def send_ping(self):
+                self.ping_task = asyncio.current_task()
+
+        client = TalentMarketClient()
+        session = FakeSession()
+        streams = (AsyncMock(), AsyncMock())
+        stream_context = TaskBoundContext(streams)
+        session_context = TaskBoundContext(session)
+
+        with patch(
+            "mcp.client.sse.sse_client",
+            return_value=stream_context,
+        ), patch(
+            "onemancompany.agents.recruitment.ClientSession",
+            return_value=session_context,
+        ):
+            # Startup and shutdown intentionally happen in different tasks,
+            # matching FastAPI startup/reconnect/shutdown behaviour.
+            connect_task = asyncio.create_task(
+                client.connect("http://test/sse", "test-key")
+            )
+            await connect_task
+            await client._call("test_tool", foo="bar")
+            await client.ping()
+            await client.disconnect()
+
+        assert session_context.owner is stream_context.owner
+        assert session.call_task is session_context.owner
+        assert session.ping_task is session_context.owner
+        assert not client.connected
+
+    @pytest.mark.asyncio
+    async def test_cancelled_connect_stops_owner_and_closes_entered_context(self):
+        from onemancompany.agents.recruitment import TalentMarketClient
+
+        session_enter_started = asyncio.Event()
+        never_ready = asyncio.Event()
+
+        class OuterContext:
+            def __init__(self):
+                self.owner = None
+                self.exit_task = None
+
+            async def __aenter__(self):
+                self.owner = asyncio.current_task()
+                return AsyncMock(), AsyncMock()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self.exit_task = asyncio.current_task()
+
+        class BlockingSessionContext:
+            async def __aenter__(self):
+                session_enter_started.set()
+                await never_ready.wait()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+        client = TalentMarketClient()
+        outer_context = OuterContext()
+        with patch(
+            "mcp.client.sse.sse_client",
+            return_value=outer_context,
+        ), patch(
+            "onemancompany.agents.recruitment.ClientSession",
+            return_value=BlockingSessionContext(),
+        ):
+            connect_task = asyncio.create_task(
+                client.connect("http://test/sse", "test-key")
+            )
+            await session_enter_started.wait()
+            connect_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await connect_task
+
+        assert outer_context.exit_task is outer_context.owner
+        assert client._owner_task is None
         assert not client.connected
 
     @pytest.mark.asyncio

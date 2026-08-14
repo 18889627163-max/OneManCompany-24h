@@ -343,7 +343,7 @@ async def talent_market_keepalive() -> list | None:
         return None
 
     try:
-        await talent_market._session.send_ping()
+        await talent_market.ping()
         logger.debug("[talent_market_keepalive] ping OK")
     except Exception as e:
         logger.warning("[talent_market_keepalive] ping failed ({}), reconnecting...", e)

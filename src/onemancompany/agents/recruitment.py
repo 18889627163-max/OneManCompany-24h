@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from langchain_core.tools import tool
 from mcp import ClientSession
 
@@ -308,12 +308,33 @@ def _talent_to_candidate(talent: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _TalentMarketCommand:
+    """A call executed by the task that owns the MCP SSE cancel scope."""
+
+    operation: str
+    future: asyncio.Future = field(repr=False)
+    tool_name: str = ""
+    arguments: dict = field(default_factory=dict)
+
+
 class TalentMarketClient:
-    """SSE-based MCP client for the cloud Talent Market service."""
+    """SSE-based MCP client with a task-owned connection lifecycle.
+
+    AnyIO task groups and cancel scopes must be exited by the same asyncio task
+    that entered them.  Calls, reconnects and application shutdown can originate
+    from different tasks, so a dedicated owner task creates the SSE contexts,
+    executes all session operations and closes those contexts itself.
+    """
 
     def __init__(self) -> None:
         self._session: ClientSession | None = None
-        self._stack: AsyncExitStack | None = None
+        # Kept for compatibility with stale/test clients created by older code;
+        # new connections never expose an AsyncExitStack across task boundaries.
+        self._stack = None
+        self._owner_task: asyncio.Task | None = None
+        self._command_queue: asyncio.Queue[_TalentMarketCommand] | None = None
+        self._ready: asyncio.Future | None = None
         self._api_key: str = ""
         self._url: str = ""
 
@@ -321,27 +342,126 @@ class TalentMarketClient:
         """Establish an SSE connection to the Talent Market MCP server."""
         if self._session is not None:
             return
-        from mcp.client.sse import sse_client
+        if self._owner_task is not None and not self._owner_task.done():
+            if self._ready is not None:
+                await asyncio.shield(self._ready)
+            return
 
-        stack = AsyncExitStack()
-        headers = {"Authorization": f"Bearer {api_key}"}
-        read, write = await stack.enter_async_context(sse_client(url=url, headers=headers))
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        self._session = session
-        self._stack = stack
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[_TalentMarketCommand] = asyncio.Queue()
+        ready = loop.create_future()
         self._api_key = api_key
         self._url = url
+        self._command_queue = queue
+        self._ready = ready
+        owner = asyncio.create_task(
+            self._run_owner(url, api_key, queue, ready),
+            name="omc-talent-market-sse-owner",
+        )
+        self._owner_task = owner
+        try:
+            await asyncio.shield(ready)
+        except BaseException:
+            # If the task waiting for startup is cancelled, stop the owner as
+            # well.  Otherwise it may remain alive with no caller responsible
+            # for its lifecycle, and this gather can wait indefinitely.
+            if not owner.done():
+                owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
+            # The shielded waiter may have been cancelled before observing the
+            # owner's startup exception.  Retrieve it to avoid an unhandled
+            # Future warning during application shutdown.
+            if ready.done() and not ready.cancelled():
+                ready.exception()
+            if self._owner_task is owner:
+                self._owner_task = None
+                self._command_queue = None
+                self._ready = None
+            raise
         logger.info("Connected to Talent Market at {}", url)
+
+    async def _run_owner(
+        self,
+        url: str,
+        api_key: str,
+        queue: asyncio.Queue[_TalentMarketCommand],
+        ready: asyncio.Future,
+    ) -> None:
+        """Own SSE/ClientSession enter, use and exit in one asyncio task."""
+        from mcp.client.sse import sse_client
+
+        active_command: _TalentMarketCommand | None = None
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with sse_client(url=url, headers=headers) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    self._session = session
+                    if not ready.done():
+                        ready.set_result(None)
+
+                    while True:
+                        active_command = await queue.get()
+                        try:
+                            if active_command.operation == "ping":
+                                result = await session.send_ping()
+                            else:
+                                result = await session.call_tool(
+                                    active_command.tool_name,
+                                    arguments=active_command.arguments,
+                                )
+                        except asyncio.CancelledError:
+                            raise
+                        except BaseException as exc:
+                            if not active_command.future.done():
+                                active_command.future.set_exception(exc)
+                        else:
+                            if not active_command.future.done():
+                                active_command.future.set_result(result)
+                        finally:
+                            active_command = None
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            elif active_command is not None and not active_command.future.done():
+                active_command.future.set_exception(exc)
+            logger.warning("Talent Market SSE owner stopped ({})", type(exc).__name__)
+        finally:
+            self._session = None
+            if active_command is not None and not active_command.future.done():
+                active_command.future.set_exception(RuntimeError("Talent Market disconnected"))
+            while not queue.empty():
+                command = queue.get_nowait()
+                if not command.future.done():
+                    command.future.set_exception(RuntimeError("Talent Market disconnected"))
+            if not ready.done():
+                ready.set_exception(RuntimeError("Talent Market connection stopped before initialization"))
 
     async def disconnect(self) -> None:
         """Tear down the MCP connection."""
-        if self._session is None:
+        owner = self._owner_task
+        if self._session is None and (owner is None or owner.done()):
             return
-        stack = self._stack
         self._session = None
-        self._stack = None
         self._api_key = ""
+        self._ready = None
+        self._command_queue = None
+        self._owner_task = None
+
+        if owner is not None:
+            # Cancellation is delivered *inside* the owner task, so its nested
+            # async context managers also exit in that same task.
+            if not owner.done():
+                owner.cancel()
+            await asyncio.gather(owner, return_exceptions=True)
+            logger.info("Talent Market disconnected")
+            return
+
+        # Compatibility cleanup for an object created by an older runtime.
+        stack = self._stack
+        self._stack = None
         if stack:
             await stack.aclose()
         logger.info("Talent Market disconnected")
@@ -350,6 +470,24 @@ class TalentMarketClient:
     def connected(self) -> bool:
         """Return True if an active session exists."""
         return self._session is not None
+
+    async def _submit(self, command: _TalentMarketCommand):
+        queue = self._command_queue
+        owner = self._owner_task
+        if queue is None or owner is None or owner.done() or self._session is None:
+            raise RuntimeError("Not connected to Talent Market")
+        queue.put_nowait(command)
+        return await command.future
+
+    async def ping(self) -> None:
+        """Run MCP keepalive inside the SSE owner task."""
+        if self._owner_task is None:
+            if self._session is None:
+                raise RuntimeError("Not connected to Talent Market")
+            await self._session.send_ping()
+            return
+        future = asyncio.get_running_loop().create_future()
+        await self._submit(_TalentMarketCommand(operation="ping", future=future))
 
     async def _call(self, tool_name: str, _retry: bool = True, **kwargs) -> dict:
         """Invoke an MCP tool, auto-injecting the API key. Auto-reconnects on connection error."""
@@ -363,7 +501,17 @@ class TalentMarketClient:
         logger.debug("[TalentMarket] calling tool={} args={}", tool_name,
                      {k: v[:30] + "..." if isinstance(v, str) and len(v) > 30 else v for k, v in kwargs.items() if k != "api_key"})
         try:
-            result = await self._session.call_tool(tool_name, arguments=kwargs)
+            if self._owner_task is None:
+                # Compatibility path for injected sessions in tests/old runtimes.
+                result = await self._session.call_tool(tool_name, arguments=kwargs)
+            else:
+                future = asyncio.get_running_loop().create_future()
+                result = await self._submit(_TalentMarketCommand(
+                    operation="tool",
+                    future=future,
+                    tool_name=tool_name,
+                    arguments=kwargs,
+                ))
         except Exception as e:
             if not _retry:
                 raise
