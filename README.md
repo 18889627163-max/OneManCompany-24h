@@ -485,3 +485,4 @@ If you use OneManCompany in your research or project, please cite it:
 
 [Apache License 2.0](LICENSE) — Free for commercial use and modification, with attribution required.
 # OneManCompany-24h
+# company-ops
