@@ -257,6 +257,40 @@ class TestInjectDefaultSkills:
         assert (dst_dir / "SKILL.md").read_text() == "UPDATED CONTENT"
         assert (dst_dir / "hooks" / "hook.py").exists()
 
+    def test_reconcile_default_skills_dry_run_then_execute_is_safe_and_idempotent(self, tmp_path, monkeypatch):
+        import onemancompany.agents.onboarding as ob_mod
+        monkeypatch.setattr(ob_mod, "_DEFAULT_SKILLS_DIR", tmp_path / "default_skills")
+        monkeypatch.setattr(ob_mod, "_DEFAULT_SKILL_NAMES", ("self-improving-agent",))
+        monkeypatch.setattr(ob_mod, "_EA_SKILL_NAMES", ())
+
+        src = tmp_path / "default_skills" / "self-improving-agent"
+        (src / "hooks").mkdir(parents=True)
+        (src / "SKILL.md").write_text("SOURCE SKILL", encoding="utf-8")
+        (src / "hooks" / "session-logger.sh").write_text("source logger", encoding="utf-8")
+        (src / "hooks" / "employee-owned.sh").write_text("source version", encoding="utf-8")
+
+        skills_dir = tmp_path / "employees" / "00002" / "skills"
+        dst = skills_dir / "self-improving-agent"
+        (dst / "hooks").mkdir(parents=True)
+        (dst / "SKILL.md").write_text("OLD DEFAULT SKILL", encoding="utf-8")
+        (dst / "hooks" / "employee-owned.sh").write_text("employee customization", encoding="utf-8")
+
+        dry_run = ob_mod.reconcile_default_skills(skills_dir, employee_id="00002", dry_run=True)
+        assert dry_run["changed"] is True
+        assert not (dst / "hooks" / "session-logger.sh").exists()
+        assert (dst / "SKILL.md").read_text(encoding="utf-8") == "OLD DEFAULT SKILL"
+
+        applied = ob_mod.reconcile_default_skills(skills_dir, employee_id="00002", dry_run=False)
+        assert applied["changed"] is True
+        assert (dst / "SKILL.md").read_text(encoding="utf-8") == "SOURCE SKILL"
+        assert (dst / "hooks" / "session-logger.sh").read_text(encoding="utf-8") == "source logger"
+        assert (dst / "hooks" / "employee-owned.sh").read_text(encoding="utf-8") == "employee customization"
+        assert any(item["action"] == "conflict" for item in applied["files"])
+
+        second = ob_mod.reconcile_default_skills(skills_dir, employee_id="00002", dry_run=False)
+        assert second["changed"] is False
+        assert all(item["action"] in {"same", "conflict"} for item in second["files"])
+
 
 # ---------------------------------------------------------------------------
 # _assign_default_avatar (lines 673-694)

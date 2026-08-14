@@ -63,6 +63,7 @@ from onemancompany.core.config import (
 from onemancompany.core.project_archive import ITER_STATUS_FAILED, PA_TOKEN_USAGE
 from onemancompany.core.events import CompanyEvent, event_bus
 from onemancompany.core.models import EventType
+from onemancompany.core.task_lifecycle import is_system_project_id
 from onemancompany.core.state import company_state  # noqa: F401 — tests patch this
 from onemancompany.core import store as _store
 from onemancompany.core.vessel_config import VesselConfig
@@ -1986,13 +1987,15 @@ class EmployeeManager:
                 if dep_ctx:
                     task_with_ctx = dep_ctx + task_with_ctx
 
-                if project_id:
+                named_project_context = bool(project_id and not is_system_project_id(project_id))
+
+                if named_project_context:
                     identity = self._build_project_identity(project_id)
                     if identity:
                         task_with_ctx = f"{identity}\n\n{task_with_ctx}"
 
                 # Product context — inject if project is linked to a product
-                if project_id:
+                if named_project_context:
                     from onemancompany.core.project_archive import load_named_project as _load_named_proj
                     _proj_doc = _load_named_proj(project_id)
                     _product_id = _proj_doc.get("product_id", "") if _proj_doc else ""
@@ -2004,21 +2007,21 @@ class EmployeeManager:
                             if _prod_ctx:
                                 task_with_ctx = f"{_prod_ctx}\n\n{task_with_ctx}"
 
-                if _effective_dir:
+                if named_project_context and _effective_dir:
                     task_with_ctx += f"\n\n[Project workspace: {_effective_dir} — save all outputs here]"
 
                 # Product workspace — inject if project has a product worktree
-                if project_id:
+                if named_project_context:
                     _pw_ctx = self._get_product_workspace_context(project_id)
                     if _pw_ctx:
                         task_with_ctx += f"\n\n{_pw_ctx}"
 
-                if project_id:
+                if named_project_context:
                     proj_ctx = self._get_project_history_context(project_id)
                     if proj_ctx:
                         task_with_ctx = f"{task_with_ctx}\n\n{proj_ctx}"
 
-                if project_id:
+                if named_project_context:
                     workflow_ctx = self._get_project_workflow_context(employee_id, project_id)
                     if workflow_ctx:
                         task_with_ctx = f"{task_with_ctx}\n\n{workflow_ctx}"

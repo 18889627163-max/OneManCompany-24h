@@ -18,6 +18,7 @@ OneManCompany-main/
 │   │   ├── verification-checklist.md      # 验证清单
 │   │   ├── IMPLEMENTATION-PLAN.md          # 持续运行、恢复与长期记忆实施计划
 │   │   ├── ADR-001-sqlite-runtime.md       # SQLite 单机运行时架构决策
+│   │   ├── RUNTIME-WARNING-REMEDIATION-PLAN.md # 历史员工、Hook 与自动化告警专项计划
 │   │   ├── STATUS-REPORT.md                # 当前实施状态与阻塞项
 │   │   ├── reports/                        # P0、恢复、服务和数据审计报告
 │   │   ├── cost-analysis.md               # 目标文件，当前不存在
@@ -131,6 +132,11 @@ OneManCompany-main/
 #### [ADR-001-sqlite-runtime.md](./ADR-001-sqlite-runtime.md)
 - **用途**：记录当前 SQLite 单机方案的正式决策、边界和 PostgreSQL 迁移触发条件
 - **适合**：架构评审、上线前 Gate 和未来迁移准备
+
+#### [RUNTIME-WARNING-REMEDIATION-PLAN.md](./RUNTIME-WARNING-REMEDIATION-PLAN.md)
+- **用途**：处理历史 ex-employee、缺失 skill hook、system automation 假告警和 adhoc TaskTree 路径问题
+- **内容**：红灯测试、受控 skill reconciliation、system project 隔离、备份/隔离/回滚和专项 Gate
+- **适合**：真实云 Provider 与 24 小时墙钟演练前的 P1 运行卫生修复
 
 ### 2. 员工工作原则（11个文件）
 
@@ -545,3 +551,7 @@ OneManCompany-main/
 - `reports/RECOVERY-REPORT.md`：SQLite 独立备份恢复演练结果。
 - `reports/FORMAL-DATA-INTEGRITY-20260814.md`：正式数据隔离、live-service 并发活动和 `iter_009` 保护。
 - `STATUS-REPORT.md`：当前已完成项、隔离验证和正式上线阻塞项。
+
+### Runtime warning remediation execution report
+
+- `reports/RUNTIME-WARNING-REMEDIATION-20260814.md` — completed implementation, audited runtime maintenance, backup/restore evidence, full test result, and controlled live-service verification.

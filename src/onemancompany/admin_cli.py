@@ -47,9 +47,38 @@ def main(argv: list[str] | None = None) -> int:
     checkpoint = sub.add_parser("checkpoint")
     cp_sub = checkpoint.add_subparsers(dest="action", required=True)
     prune = cp_sub.add_parser("prune"); prune.add_argument("--older-than", type=int, default=30); prune.add_argument("--execute", action="store_true")
+    hr = sub.add_parser("hr")
+    hr_sub = hr.add_subparsers(dest="action", required=True)
+    quarantine = hr_sub.add_parser("quarantine-archived")
+    quarantine.add_argument("--employee", required=True)
+    quarantine.add_argument("--reason", required=True)
+    quarantine.add_argument("--backup-manifest", required=True)
+    quarantine.add_argument("--execute", action="store_true")
+    skills = sub.add_parser("skills")
+    skills_sub = skills.add_subparsers(dest="action", required=True)
+    reconcile = skills_sub.add_parser("reconcile")
+    reconcile.add_argument("--employee", required=True)
+    reconcile.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     if args.url: os.environ["OMC_ADMIN_URL"] = args.url
     if args.token: os.environ["OMC_ADMIN_TOKEN"] = args.token
+    if args.resource == "hr":
+        return _request(
+            "POST",
+            "/api/admin/hr/quarantine-archived",
+            body={
+                "employee_id": args.employee,
+                "reason": args.reason,
+                "backup_manifest_path": args.backup_manifest,
+                "dry_run": not args.execute,
+            },
+        )
+    if args.resource == "skills":
+        return _request(
+            "POST",
+            "/api/admin/skills/reconcile",
+            body={"employee_id": args.employee, "dry_run": not args.execute},
+        )
     if args.resource == "memory":
         if args.action == "list": return _request("GET", "/api/admin/memories", params={"status": args.status, "scope": args.scope})
         if args.action == "detail": return _request("GET", f"/api/admin/memories/{args.memory_id}")

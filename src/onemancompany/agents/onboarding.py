@@ -7,8 +7,10 @@ Called by routes.py (talent market hire) and hr_agent.py (_apply_results).
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json as _json
+import os
 import random
 import shutil
 import subprocess
@@ -625,45 +627,132 @@ async def clone_talent_repo(repo_url: str, talent_id: str) -> Path:
     return resolved if resolved.exists() else _TALENTS_CLONE_DIR
 
 
-def _inject_default_skills(skills_dir: Path, employee_id: str = "") -> None:
-    """Copy/update default skills into the employee's skills folder.
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    Always overwrites SKILL.md from the source to pick up frontmatter
-    changes (e.g. autoload flag). Preserves employee-specific files
-    in the skill directory that don't exist in the source.
+
+def _atomic_copy_default_file(source: Path, target: Path) -> None:
+    """Copy one default-owned file without exposing a partially written target."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        shutil.copy2(source, temporary)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def reconcile_default_skills(
+    skills_dir: Path,
+    employee_id: str = "",
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """Reconcile default-owned skill files while preserving employee customizations.
+
+    Required default skills are reconciled for every employee. Other packaged
+    default skills are reconciled only when already installed for that employee,
+    so upgrades add missing files without granting new capabilities implicitly.
+    ``SKILL.md`` is versioned default-owned metadata and may be updated; differing
+    files elsewhere are reported as conflicts and never overwritten.
     """
     from onemancompany.core.config import EA_ID
-    names = list(_DEFAULT_SKILL_NAMES)
+
+    skills_dir = Path(skills_dir)
+    names = set(_DEFAULT_SKILL_NAMES)
     if employee_id == EA_ID:
-        names.extend(_EA_SKILL_NAMES)
-    for name in names:
-        src = _DEFAULT_SKILLS_DIR / name
-        if not src.exists():
+        names.update(_EA_SKILL_NAMES)
+    if skills_dir.exists():
+        names.update(
+            child.name
+            for child in skills_dir.iterdir()
+            if child.is_dir() and (_DEFAULT_SKILLS_DIR / child.name).is_dir()
+        )
+
+    files: list[dict] = []
+    for name in sorted(names):
+        source_skill = _DEFAULT_SKILLS_DIR / name
+        if not source_skill.is_dir():
             continue
-        dst = skills_dir / name
-        if not dst.exists():
-            shutil.copytree(str(src), str(dst))
-        else:
-            # Sync SKILL.md from source to pick up changes
-            src_md = src / "SKILL.md"
-            dst_md = dst / "SKILL.md"
-            if src_md.exists():
-                shutil.copy2(str(src_md), str(dst_md))
-            # Sync hooks/ and other subdirectories (new scripts, templates)
-            for sub in src.iterdir():
-                if sub.is_dir() and sub.name != "__pycache__":
-                    dst_sub = dst / sub.name
-                    if not dst_sub.exists():
-                        shutil.copytree(str(sub), str(dst_sub))
-                    else:
-                        # Copy new files into existing subdir
-                        for f in sub.iterdir():
-                            dst_f = dst_sub / f.name
-                            if not dst_f.exists():
-                                if f.is_file():
-                                    shutil.copy2(str(f), str(dst_f))
-                                elif f.is_dir():
-                                    shutil.copytree(str(f), str(dst_f))
+        target_skill = skills_dir / name
+        for source in sorted(source_skill.rglob("*")):
+            relative = source.relative_to(source_skill)
+            if "__pycache__" in relative.parts or source.is_dir():
+                continue
+            target = target_skill / relative
+            source_hash = _sha256_file(source)
+            target_hash = _sha256_file(target) if target.is_file() else None
+            default_owned = relative.as_posix() == SKILL_FILENAME
+            if target_hash is None:
+                action = "add"
+            elif target_hash == source_hash:
+                action = "same"
+            elif default_owned:
+                action = "update_default"
+            else:
+                action = "conflict"
+
+            files.append({
+                "skill": name,
+                "path": relative.as_posix(),
+                "action": action,
+                "source_sha256": source_hash,
+                "target_sha256": target_hash,
+            })
+            if not dry_run and action in {"add", "update_default"}:
+                _atomic_copy_default_file(source, target)
+
+    changed = any(item["action"] in {"add", "update_default"} for item in files)
+    return {
+        "employee_id": employee_id,
+        "skills_dir": str(skills_dir),
+        "dry_run": dry_run,
+        "changed": changed,
+        "files": files,
+        "conflicts": sum(item["action"] == "conflict" for item in files),
+    }
+
+
+async def reconcile_default_skills_with_audit(
+    skills_dir: Path,
+    employee_id: str,
+    *,
+    storage,
+    dry_run: bool,
+    operator: str,
+) -> dict:
+    """Reconcile defaults and persist the complete hash/action audit."""
+    report = reconcile_default_skills(
+        skills_dir,
+        employee_id=employee_id,
+        dry_run=dry_run,
+    )
+    await storage.append_audit(
+        "default_skills_reconciled",
+        {
+            "operator": operator,
+            "employee_id": employee_id,
+            "dry_run": dry_run,
+            "changed": report["changed"],
+            "conflicts": report["conflicts"],
+            "files": report["files"],
+        },
+    )
+    return report
+
+
+def _inject_default_skills(skills_dir: Path, employee_id: str = "") -> None:
+    """Backward-compatible onboarding wrapper for default skill reconciliation."""
+    report = reconcile_default_skills(skills_dir, employee_id=employee_id, dry_run=False)
+    if report["changed"] or report["conflicts"]:
+        logger.info(
+            "[skills] Reconciled defaults for {}: changed={} conflicts={}",
+            employee_id or skills_dir.parent.name,
+            report["changed"],
+            report["conflicts"],
+        )
 
 
 def _assign_default_avatar(emp_dir: Path, emp_num: str) -> None:

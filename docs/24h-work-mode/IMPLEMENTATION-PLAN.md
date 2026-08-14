@@ -1,6 +1,6 @@
 # OneManCompany 24 小时持续运行、可恢复执行与长期记忆实施计划
 
-> 版本：3.6  
+> 版本：3.7
 > 日期：2026-08-14  
 > 目标架构：SQLite + LangGraph AsyncSqliteSaver + AsyncSqliteStore/sqlite-vec + TaskTree standard v2  
 > 当前状态：实施中；尚未满足正式启动 24 小时模式的条件
@@ -116,7 +116,7 @@
 - 隔离模拟 Provider 429 已通过：`os._exit(88)` 后 holding metadata 恢复，成功 callable 只执行一次；
 - P0 Gate 重跑结果为 `standard_v2_p0=passed`，Recovery Gate 为 `standard_v2_recovery=passed`，两者均保持 `formal_24h_launch_allowed=false`；
 - memory-enabled 隔离真实服务 health、在线备份、直接 integrity check 和 clean shutdown 已通过；
-- 最终全量测试达到 `4662 passed, 5 skipped, 73 warnings`；
+- 最终全量测试达到 `4677 passed, 5 skipped, 73 warnings`；
 - recovery tests 全部使用临时 `OMC_DATA_ROOT`；当前正式服务并发写入单独记为 live-service activity，不做危险回滚；
 - `iter_009` 哈希保持 `fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251`。
 
@@ -1341,7 +1341,18 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 9. side-effect invocation ledger 和 Provider durable retry 修复；
 10. checkpoint reconciler 启动接入及 TaskTree-first 状态矩阵；
 11. 隔离 subprocess crash/resume、副作用防重放和模拟 Provider 429 holding/resume；
-12. 全量测试 `4662 passed, 5 skipped`，P0 与 Recovery Gate 均通过。
+12. 全量测试 `4677 passed, 5 skipped`，P0 与 Recovery Gate 均通过。
+
+### 已完成 P1：运行告警与历史数据治理
+
+`RUNTIME-WARNING-REMEDIATION-PLAN.md` 专项 Gate 已于 2026-08-14 完成；实现、审计、备份恢复和受控真实服务证据见 `reports/RUNTIME-WARNING-REMEDIATION-20260814.md`：
+
+1. 修复 `ask_first` skill hook 在跳过前仍解析 trigger 的顺序问题；
+2. 受控补齐既有员工缺失的 `session-logger.sh`，保留员工定制并记录哈希审计；
+3. 将 `_sys_automation_*` 与普通 named project context 隔离，但保留 TaskTree/checkpoint/receipt；
+4. automation/adhoc 工具改用任务条目的权威 `tree_path`，standard v2 缺树 fail closed；
+5. 先扩展一致性备份覆盖 ex/quarantine，再隔离非法历史 profile；
+6. 正式 `employees/00010` 和 `iter_009` 在维护前后哈希必须保持不变。
 
 ### 下一组 P1：真实长期记忆与 Provider Gate
 

@@ -1122,6 +1122,42 @@ class TestEmployeeManagerExecuteTaskWithProject:
         assert "[Project Context]" in task_desc
         assert "[Workflow]" in task_desc
 
+    @pytest.mark.asyncio
+    @patch("onemancompany.core.vessel.company_state")
+    @patch("onemancompany.core.vessel.event_bus")
+    @patch("onemancompany.core.vessel._load_progress", return_value="")
+    @patch("onemancompany.core.vessel._append_progress")
+    async def test_execute_system_automation_skips_named_project_context(
+        self, mock_append, mock_load, mock_bus, mock_state, tmp_path
+    ):
+        mock_bus.publish = AsyncMock()
+        mock_state.active_tasks = []
+        mgr = EmployeeManager()
+        launcher = MagicMock(spec=Launcher)
+        launcher.execute = AsyncMock(return_value=LaunchResult(output="Done"))
+        mgr.register("emp01", launcher)
+        entry, _, _ = _make_tree_entry(tmp_path, project_id="_sys_automation_health")
+        mgr.schedule_node("emp01", entry.node_id, entry.tree_path)
+
+        with patch("onemancompany.core.resolutions.current_project_id", MagicMock()), \
+             patch.object(mgr, "_build_project_identity") as identity, \
+             patch.object(mgr, "_get_product_workspace_context") as product_workspace, \
+             patch.object(mgr, "_get_project_history_context") as history, \
+             patch.object(mgr, "_get_project_workflow_context") as workflow, \
+             patch("onemancompany.core.project_archive.load_named_project") as named_project, \
+             patch("onemancompany.core.project_archive.record_project_cost"), \
+             patch("onemancompany.core.project_archive.append_action"), \
+             patch("onemancompany.core.resolutions.create_resolution", return_value=None), \
+             patch.object(mgr, "_on_child_complete", new_callable=AsyncMock):
+            await mgr._execute_task("emp01", entry)
+
+        identity.assert_not_called()
+        named_project.assert_not_called()
+        product_workspace.assert_not_called()
+        history.assert_not_called()
+        workflow.assert_not_called()
+        task_desc = launcher.execute.call_args[0][0]
+        assert "[Project workspace:" not in task_desc
 
 
 # ---------------------------------------------------------------------------

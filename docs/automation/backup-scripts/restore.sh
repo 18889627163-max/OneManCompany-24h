@@ -18,11 +18,17 @@ fi
 DB_BACKUP="$BACKUP_DIR/db/runtime-${TIMESTAMP}.sqlite3"
 MANIFEST="$DB_BACKUP.manifest.json"
 EMP_BACKUP="$BACKUP_DIR/employees/employees_${TIMESTAMP}.tar.gz"
+EMP_MANIFEST="$BACKUP_DIR/employees/employees_${TIMESTAMP}.manifest.json"
 PROJECT_BACKUP="$BACKUP_DIR/projects/projects_${TIMESTAMP}.tar.gz"
 CONFIG_BACKUP="$BACKUP_DIR/config/config_${TIMESTAMP}.tar.gz"
 
 test -f "$DB_BACKUP" || { echo "Missing database backup: $DB_BACKUP" >&2; exit 1; }
 test -f "$MANIFEST" || { echo "Missing database manifest: $MANIFEST" >&2; exit 1; }
+if test "$RESTORE_FILESYSTEM" = true && test -f "$EMP_BACKUP"; then
+  test -f "$EMP_MANIFEST" || { echo "Missing HR archive manifest: $EMP_MANIFEST" >&2; exit 1; }
+  "${PYTHON:-.venv/bin/python}" scripts/hr_backup.py verify \
+    --archive "$EMP_BACKUP" --manifest "$EMP_MANIFEST"
+fi
 
 # Any HTTP response means the service is running; do not replace its database.
 if curl --silent --show-error --connect-timeout 2 --max-time 5 \
@@ -138,7 +144,15 @@ restore_data_archive() {
   esac
 }
 if test "$RESTORE_FILESYSTEM" = true; then
-  test ! -f "$EMP_BACKUP" || restore_data_archive "$EMP_BACKUP"
+  if test -f "$EMP_BACKUP"; then
+    # Preserve the complete current HR state before any filesystem overwrite.
+    "${PYTHON:-.venv/bin/python}" scripts/hr_backup.py create \
+      --data-root "$DATA_ROOT" \
+      --archive "$SAFETY_DIR/hr-before-restore.tar.gz" \
+      --manifest "$SAFETY_DIR/hr-before-restore.manifest.json"
+    "${PYTHON:-.venv/bin/python}" scripts/hr_backup.py verify \
+      --archive "$EMP_BACKUP" --manifest "$EMP_MANIFEST" --extract-dir "$DATA_ROOT"
+  fi
   test ! -f "$PROJECT_BACKUP" || restore_data_archive "$PROJECT_BACKUP"
   test ! -f "$CONFIG_BACKUP" || tar -C "$ROOT_DIR" -xzf "$CONFIG_BACKUP"
 else

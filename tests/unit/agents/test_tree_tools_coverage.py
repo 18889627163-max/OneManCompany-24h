@@ -19,6 +19,22 @@ class TestLoadTree:
         tree = _load_tree(str(tmp_path))
         assert tree.project_id == ""
 
+    def test_explicit_automation_tree_path_is_authoritative(self, tmp_path):
+        from onemancompany.agents.tree_tools import _load_tree
+        from onemancompany.core.task_tree import TaskTree
+        ordinary = TaskTree(project_id="wrong")
+        ordinary.save(tmp_path / "task_tree.yaml")
+        automation_path = tmp_path / "node_tree.yaml"
+        automation = TaskTree(project_id="_sys_automation_health")
+        automation.save(automation_path)
+        loaded = _load_tree(str(tmp_path), str(automation_path))
+        assert loaded.project_id == "_sys_automation_health"
+
+    def test_missing_explicit_tree_fails_closed(self, tmp_path):
+        from onemancompany.agents.tree_tools import _load_tree
+        with pytest.raises(FileNotFoundError, match="Authoritative TaskTree"):
+            _load_tree(str(tmp_path), str(tmp_path / "missing_tree.yaml"))
+
 
 # ---------------------------------------------------------------------------
 # _find_entry_for_task (lines 49-50, 57-59)
@@ -97,6 +113,15 @@ class TestSaveTree:
         with patch("onemancompany.core.task_tree.save_tree_async") as mock_save:
             _save_tree(str(tmp_path), tree)
         mock_save.assert_called_once()
+
+    def test_save_tree_uses_explicit_automation_path(self, tmp_path):
+        from onemancompany.agents.tree_tools import _save_tree
+        from onemancompany.core.task_tree import TaskTree
+        tree = TaskTree(project_id="_sys_automation_health")
+        explicit = tmp_path / "node_tree.yaml"
+        with patch("onemancompany.core.task_tree.save_tree_async") as mock_save:
+            _save_tree(str(tmp_path), tree, str(explicit))
+        mock_save.assert_called_once_with(explicit)
 
 
 # ---------------------------------------------------------------------------

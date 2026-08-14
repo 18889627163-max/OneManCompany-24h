@@ -168,7 +168,12 @@ def register_skill_hooks(employee_id: str, skill_name: str, hooks_meta: dict) ->
                         timeout=inner.get("timeout", DEFAULT_TIMEOUT),
                     )
             else:
-                # Flat format (command) or frontmatter trigger format
+                # Flat format (command) or frontmatter trigger format.
+                # Company-hosted agents cannot confirm ask_first hooks, so skip
+                # them before resolving trigger scripts to avoid false warnings.
+                mode = h.get("mode", "auto")
+                if mode == "ask_first":
+                    continue
                 command = h.get("command", "")
                 if not command and h.get("trigger"):
                     # Resolve trigger name to script in skill's hooks/ dir
@@ -177,7 +182,7 @@ def register_skill_hooks(employee_id: str, skill_name: str, hooks_meta: dict) ->
                     employee_id, event, skill_name,
                     command=command,
                     matcher=h.get("matcher", ""),
-                    mode=h.get("mode", "auto"),
+                    mode=mode,
                     timeout=h.get("timeout", DEFAULT_TIMEOUT),
                 )
 

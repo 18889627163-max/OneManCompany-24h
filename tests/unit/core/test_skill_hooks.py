@@ -145,6 +145,19 @@ class TestRegistration:
         count = register_skill_hooks("00004", "test-skill", hooks_meta)
         assert count == 0
 
+    def test_ask_first_trigger_is_skipped_before_resolution(self):
+        hooks_meta = {
+            "task_complete": [
+                {"trigger": "create-pr", "mode": "ask_first"},
+            ],
+        }
+        with patch("onemancompany.core.skill_hooks._resolve_trigger") as resolve_trigger:
+            count = register_skill_hooks("00004", "test-skill", hooks_meta)
+
+        assert count == 0
+        resolve_trigger.assert_not_called()
+        assert get_hooks("00004", HookEvent.TASK_COMPLETE) == []
+
     def test_skip_unknown_event(self):
         hooks_meta = {"unknown_event": [{"command": "echo x"}]}
         count = register_skill_hooks("00004", "test-skill", hooks_meta)

@@ -16,9 +16,12 @@ mkdir -p "$BACKUP_DIR"/{db,employees,projects,config}
 
 printf 'OneManCompany backup %s\n' "$TIMESTAMP"
 
-# Filesystem configuration is intentionally limited to non-secret data.
-tar -C "$DATA_ROOT" -czf "$BACKUP_DIR/employees/employees_${BACKUP_SET_ID}.tar.gz" \
-  company/human_resource/employees/ 2>/dev/null || true
+# HR archive includes active, archived, and quarantined employees. The adjacent
+# manifest contains a SHA-256 for the archive and every file.
+HR_ARCHIVE="$BACKUP_DIR/employees/employees_${BACKUP_SET_ID}.tar.gz"
+HR_MANIFEST="$BACKUP_DIR/employees/employees_${BACKUP_SET_ID}.manifest.json"
+"${PYTHON:-.venv/bin/python}" scripts/hr_backup.py create \
+  --data-root "$DATA_ROOT" --archive "$HR_ARCHIVE" --manifest "$HR_MANIFEST"
 tar -C "$DATA_ROOT" -czf "$BACKUP_DIR/projects/projects_${BACKUP_SET_ID}.tar.gz" \
   company/business/projects/ 2>/dev/null || true
 tar --exclude='.env' --exclude='.onemancompany/.env' -czf \

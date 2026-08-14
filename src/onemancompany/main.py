@@ -550,13 +550,36 @@ async def _application_lifespan(app: FastAPI):
         register_founding_employee(_fid, _agent_cls, _emp_cfgs, _EMPLOYEES_DIR)
         _registered_founding.add(_fid)
 
-    # Sync default skills (SKILL.md) for all existing employees on startup
-    from onemancompany.agents.onboarding import _inject_default_skills
+    # Reconcile packaged default skills through the audited runtime boundary.
+    # Without RuntimeStorage, startup remains observable but performs no unaudited mutation.
+    from onemancompany.agents.onboarding import (
+        reconcile_default_skills,
+        reconcile_default_skills_with_audit,
+    )
+    _skill_storage = getattr(app.state, "runtime_storage", None)
     for _emp_dir in sorted(_EMPLOYEES_DIR.iterdir()):
         if _emp_dir.is_dir() and (_emp_dir / "profile.yaml").exists():
             _skills_dir = _emp_dir / "skills"
+            if _skill_storage is None:
+                _report = reconcile_default_skills(
+                    _skills_dir,
+                    employee_id=_emp_dir.name,
+                    dry_run=True,
+                )
+                if _report["changed"] or _report["conflicts"]:
+                    logger.warning(
+                        "[startup] Skill reconciliation deferred for {}: RuntimeStorage unavailable",
+                        _emp_dir.name,
+                    )
+                continue
             _skills_dir.mkdir(exist_ok=True)
-            _inject_default_skills(_skills_dir)
+            await reconcile_default_skills_with_audit(
+                _skills_dir,
+                _emp_dir.name,
+                storage=_skill_storage,
+                dry_run=False,
+                operator="system:startup",
+            )
 
     # Register CeoExecutor for CEO (virtual employee — routes to TUI, no LLM)
     from onemancompany.core.ceo_executor import CeoExecutor

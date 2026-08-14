@@ -23,12 +23,19 @@ from onemancompany.core.task_tree import TaskTree
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_tree(project_dir: str) -> TaskTree:
-    """Get TaskTree from memory cache (loading from disk if needed)."""
+def _authoritative_tree_path(project_dir: str, tree_path: str = "") -> Path:
+    """Resolve a formal task's authoritative tree path without inventing one."""
+    return Path(tree_path) if tree_path else Path(project_dir) / TASK_TREE_FILENAME
+
+
+def _load_tree(project_dir: str, tree_path: str = "") -> TaskTree:
+    """Load the TaskTree, preferring the scheduler entry's authoritative path."""
     from onemancompany.core.task_tree import get_tree
-    path = Path(project_dir) / TASK_TREE_FILENAME
+    path = _authoritative_tree_path(project_dir, tree_path)
     if not path.exists():
-        logger.warning("task_tree.yaml not found at %s", path)
+        if tree_path:
+            raise FileNotFoundError(f"Authoritative TaskTree not found: {path}")
+        logger.warning("task_tree.yaml not found at {}", path)
         return TaskTree(project_id="")
     return get_tree(path)
 
@@ -55,14 +62,14 @@ def _find_entry_for_task(task_id: str) -> tuple[str, str]:
     return "", ""
 
 
-def _save_tree(project_dir: str, tree: TaskTree) -> None:
-    """Schedule async save of the TaskTree for non-critical updates."""
+def _save_tree(project_dir: str, tree: TaskTree, tree_path: str = "") -> None:
+    """Schedule a save to the authoritative TaskTree path."""
     from onemancompany.core.task_tree import save_tree_async
-    path = Path(project_dir) / TASK_TREE_FILENAME
+    path = _authoritative_tree_path(project_dir, tree_path)
     save_tree_async(path)
 
 
-def _persist_tree_for_dispatch(project_dir: str, tree: TaskTree) -> bool:
+def _persist_tree_for_dispatch(project_dir: str, tree: TaskTree, tree_path: str = "") -> bool:
     """Synchronously persist a tree before dispatch_child returns.
 
     ``dispatch_child`` is a synchronous tool.  A fire-and-forget save can
@@ -71,7 +78,7 @@ def _persist_tree_for_dispatch(project_dir: str, tree: TaskTree) -> bool:
     """
     from onemancompany.core.task_tree import get_tree_lock, register_tree
 
-    path = Path(project_dir) / TASK_TREE_FILENAME
+    path = _authoritative_tree_path(project_dir, tree_path)
     register_tree(path, tree)
     with get_tree_lock(path):
         tree.save(path)
@@ -298,14 +305,14 @@ def set_current_node_product_id(product_id: str) -> bool:
     if not project_dir or not tree_path_str:
         return False
     with get_tree_lock(tree_path_str):
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         node = _get_current_node(tree, task_id)
         if not node:
             return False
         if node.product_id == product_id:
             return True  # already linked, nothing to persist
         node.product_id = product_id
-        _save_tree(project_dir, tree)
+        _save_tree(project_dir, tree, tree_path_str)
     return True
 
 
@@ -467,7 +474,7 @@ def dispatch_child(
     tree_lock = get_tree_lock(tree_path_str)
 
     with tree_lock:
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         current_node = _get_current_node(tree, task_id)
         if not current_node:  # pragma: no cover
             return {"status": "error", "message": "Current task not found in task tree."}  # pragma: no cover
@@ -727,7 +734,7 @@ def dispatch_child(
                 }
             tree.dispatch_manifest[task_key] = manifest_entry
             try:
-                _persist_tree_for_dispatch(project_dir, tree)
+                _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
                 dispatch_intent = _advance_dispatch_intent_sync(
                     parent_id=task_id,
                     employee_id=target_employee_id,
@@ -762,9 +769,9 @@ def dispatch_child(
         deps_resolved = tree.all_deps_resolved(child.id)
 
         if not deps_resolved:
-            _persist_tree_for_dispatch(project_dir, tree)
+            _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
             _mark_active_tasks_dirty()
-            _save_tree(project_dir, tree)  # compatibility hook; sync save already completed
+            _save_tree(project_dir, tree, tree_path_str)  # compatibility hook; sync save already completed
             # Persist task index entry for taskboard even though not yet scheduled
             from onemancompany.core.store import append_task_index_entry
             append_task_index_entry(target_employee_id, child.id, tree_path_str)
@@ -802,7 +809,7 @@ def dispatch_child(
             # The receipt is part of the durable dispatch evidence. Persist it
             # after rereading the tree/index so a YAML-only child cannot later
             # be mistaken for a tool-created child.
-            _persist_tree_for_dispatch(project_dir, tree)
+            _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
             if getattr(tree, "_source_dir", None) and not verification["verified"]:
                 return {
                     "status": "error",
@@ -826,9 +833,9 @@ def dispatch_child(
         # only after schedule_node returns, so a failed call cannot look like
         # a successful assignment.
         from onemancompany.core.vessel import employee_manager
-        _persist_tree_for_dispatch(project_dir, tree)
+        _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
         _mark_active_tasks_dirty()
-        _save_tree(project_dir, tree)  # compatibility hook; sync save already completed
+        _save_tree(project_dir, tree, tree_path_str)  # compatibility hook; sync save already completed
         schedule_node_called = False
         schedule_registered = False
         try:
@@ -880,7 +887,7 @@ def dispatch_child(
                     "message": f"Dispatch side effects exist but intent reconciliation failed: {exc}",
                 }
         # Persist the receipt as part of the same durable dispatch contract.
-        _persist_tree_for_dispatch(project_dir, tree)
+        _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
         # Existing mocked unit tests use a synthetic, non-existent tree path.
         # Real dispatches always have task_tree.yaml because _load_tree found
         # the current task there; enforce the durable contract for that path.
@@ -939,7 +946,7 @@ def accept_child(
 
     from onemancompany.core.task_tree import get_tree_lock
     with get_tree_lock(tree_path_str):
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         node = tree.get_node(node_id)
         if not node:
             # Help agent: list actual children so they know what node_ids exist
@@ -992,9 +999,9 @@ def accept_child(
                 "evidence_refs": [str(ref) for ref in (evidence_refs or [])],
                 "notes": notes,
             }
-            _persist_tree_for_dispatch(project_dir, tree)
+            _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
         else:
-            _save_tree(project_dir, tree)
+            _save_tree(project_dir, tree, tree_path_str)
 
         # Trigger dependency resolution for dependents
         from onemancompany.core.vessel import _trigger_dep_resolution
@@ -1034,7 +1041,7 @@ def reject_child(
 
     from onemancompany.core.task_tree import get_tree_lock
     with get_tree_lock(tree_path_str):
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         node = tree.get_node(node_id)
         if not node:  # pragma: no cover
             return {"status": "error", "message": f"Node {node_id} not found. Check dispatch_child() return value for correct node_id."}  # pragma: no cover
@@ -1097,9 +1104,9 @@ def reject_child(
             })
             node.directives = new_directives  # reassign to trigger _content_dirty
             if _is_standard_v2(tree) and bool(node.task_key):
-                _persist_tree_for_dispatch(project_dir, tree)
+                _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
             else:
-                _save_tree(project_dir, tree)
+                _save_tree(project_dir, tree, tree_path_str)
 
             em.schedule_node(node.employee_id, node.id, tree_path_str)
             em._schedule_next(node.employee_id)
@@ -1108,9 +1115,9 @@ def reject_child(
         else:
             node.set_status(TaskPhase.FAILED)
             if _is_standard_v2(tree) and bool(node.task_key):
-                _persist_tree_for_dispatch(project_dir, tree)
+                _persist_tree_for_dispatch(project_dir, tree, tree_path_str)
             else:
-                _save_tree(project_dir, tree)
+                _save_tree(project_dir, tree, tree_path_str)
 
             from onemancompany.core.vessel import _trigger_dep_resolution
             _trigger_dep_resolution(project_dir, tree, node)
@@ -1143,7 +1150,7 @@ def unblock_child(node_id: str, new_description: str = "") -> dict:
 
     from onemancompany.core.task_tree import get_tree_lock
     with get_tree_lock(tree_path_str):
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         node = tree.get_node(node_id)
         if not node:  # pragma: no cover
             return {"status": "error", "message": f"Node {node_id} not found. Check dispatch_child() return value for correct node_id."}  # pragma: no cover
@@ -1159,7 +1166,7 @@ def unblock_child(node_id: str, new_description: str = "") -> dict:
         if new_description:
             node.description = new_description
         node.set_status(TaskPhase.PENDING)
-        _save_tree(project_dir, tree)
+        _save_tree(project_dir, tree, tree_path_str)
 
         # Check if remaining deps are met
         from onemancompany.core.vessel import employee_manager
@@ -1202,7 +1209,7 @@ def cancel_child(node_id: str, reason: str = "") -> dict:
 
     from onemancompany.core.task_tree import get_tree_lock
     with get_tree_lock(tree_path_str):
-        tree = _load_tree(project_dir)
+        tree = _load_tree(project_dir, tree_path_str)
         node = tree.get_node(node_id)
         if not node:
             return {"status": "error", "message": f"Node {node_id} not found. Check dispatch_child() return value for correct node_id."}
@@ -1211,7 +1218,7 @@ def cancel_child(node_id: str, reason: str = "") -> dict:
 
         node.set_status(TaskPhase.CANCELLED)
         node.result = reason or "Cancelled by parent"
-        _save_tree(project_dir, tree)
+        _save_tree(project_dir, tree, tree_path_str)
 
         from onemancompany.core.vessel import _trigger_dep_resolution
         _trigger_dep_resolution(project_dir, tree, node)

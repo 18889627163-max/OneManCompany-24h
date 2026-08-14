@@ -120,6 +120,18 @@ class MemoryReviewRequest(BaseModel):
     superseded_by: str = Field(default="", max_length=200)
 
 
+class SkillReconcileRequest(BaseModel):
+    employee_id: str = Field(pattern=r"^[0-9]{5}$")
+    dry_run: bool = True
+
+
+class ArchivedEmployeeQuarantineRequest(BaseModel):
+    employee_id: str = Field(pattern=r"^[0-9]{5}$")
+    reason: str = Field(min_length=1, max_length=1000)
+    backup_manifest_path: str = Field(min_length=1, max_length=2000)
+    dry_run: bool = True
+
+
 def _memory_service_or_503(request: Request):
     from onemancompany.core.memory_service import MemoryService
     from onemancompany.core.config import settings
@@ -277,6 +289,61 @@ async def admin_supersede_memory(request: Request, memory_id: str, body: MemoryR
 async def admin_reindex_memory(request: Request, from_version: str = "", to_version: str = "") -> dict:
     _require_runtime_admin(request)
     return {"status": "accepted", "from_version": from_version or None, "to_version": to_version or None, "mode": "outbox_job_contract", "message": "Vector reindex worker is not enabled in this runtime; no data was changed."}
+
+
+@router.post("/api/admin/skills/reconcile")
+async def admin_reconcile_skills(request: Request, body: SkillReconcileRequest) -> dict:
+    """Reconcile packaged defaults into one formal employee skill directory."""
+    from onemancompany.agents.onboarding import reconcile_default_skills_with_audit
+    from onemancompany.core import config as config_mod
+
+    _require_runtime_admin(request)
+    storage = getattr(request.app.state, "runtime_storage", None)
+    if storage is None or not await storage.health_check():
+        raise HTTPException(status_code=503, detail="Runtime storage is unavailable")
+
+    employee_dir = config_mod.EMPLOYEES_DIR / body.employee_id
+    if not employee_dir.is_dir() or not (employee_dir / "profile.yaml").is_file():
+        raise HTTPException(status_code=404, detail="Formal employee not found")
+
+    skills_dir = employee_dir / "skills"
+    if not body.dry_run:
+        skills_dir.mkdir(parents=True, exist_ok=True)
+    return await reconcile_default_skills_with_audit(
+        skills_dir,
+        body.employee_id,
+        storage=storage,
+        dry_run=body.dry_run,
+        operator=_memory_admin_id(request),
+    )
+
+
+@router.post("/api/admin/hr/quarantine-archived")
+async def admin_quarantine_archived_employee(
+    request: Request,
+    body: ArchivedEmployeeQuarantineRequest,
+) -> dict:
+    from onemancompany.core import config as config_mod
+    from onemancompany.core.hr_maintenance import quarantine_archived_employee
+
+    _require_runtime_admin(request)
+    storage = getattr(request.app.state, "runtime_storage", None)
+    if storage is None or not await storage.health_check():
+        raise HTTPException(status_code=503, detail="Runtime storage is unavailable")
+    try:
+        return await quarantine_archived_employee(
+            body.employee_id,
+            reason=body.reason,
+            backup_manifest_path=body.backup_manifest_path,
+            dry_run=body.dry_run,
+            storage=storage,
+            data_root=config_mod.DATA_ROOT,
+            operator=_memory_admin_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/api/admin/checkpoints/prune")

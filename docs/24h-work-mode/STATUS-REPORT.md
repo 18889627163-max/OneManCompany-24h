@@ -1,7 +1,7 @@
 # 24 小时工作模式实施状态报告
 
 **检查日期**：2026-08-14  
-**报告版本**：4.1
+**报告版本**：4.4
 **整体状态**：🟡 实施中，尚未正式上线
 
 > 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0 与隔离 Recovery Gate 通过，不等于真实云 Provider、正式业务服务重启、24 小时墙钟和最终 standard v2 iteration 已通过。
@@ -28,6 +28,9 @@
 - ✅ `backup-all.sh`/`restore.sh` 已统一遵守 `OMC_DATA_ROOT`；隔离离线备份和独立目标恢复演练均通过。
 - ✅ `iter_009` 未迁移、未恢复、未修改；内容哈希保持不变。
 - ✅ Talent Market MCP/SSE 已改为单一 owner task 生命周期；SSE/Session 的建立、工具调用、ping 和关闭不再跨 asyncio task。
+- ✅ Runtime warning remediation 代码与正式文件操作已完成：`00002`—`00005` skill hook 已受控补齐，历史无效 `00010`/`00100` 已在验证备份后隔离，审计与回滚证据完整。
+- ✅ system automation prompt context 与 automation/adhoc TaskTree 权威路径已修复；完整测试套件 `4677 passed, 5 skipped`。
+- ✅ 本轮告警修复完成受控真实服务验证：12 个正式 profile 和 12 个 skill hooks 正常加载，员工 API 返回 11 名非 CEO 员工，目标告警未复现，readiness `PASS=35 FAIL=0 WARN=0`，服务干净关闭。
 
 ### 1.2 本轮恢复修复
 
@@ -47,6 +50,7 @@
 - ⏳ 在真实 dispatch、executor started 和正式业务 side-effect 阶段分别注入故障并完成 receipt 对账。
 - ⏳ 使用受控真实云 Provider 验证 HTTP 429、长 backoff、优先级竞争和恢复 UI；当前 Provider 演练为隔离模拟。
 - ⏳ memory worker 与正式 Agent 的真实 Provider 并发槽位让位验证。
+- ⏳ 对账正式 RuntimeStorage 当前报告的 `checkpoint_conflicts=7` 与 `memory_worker_backlog=25`；不得删除或重放，必须按 TaskTree/receipt/outbox 权威状态逐项审计。
 - ⏳ sqlite-vec 与真实云 embedding 的维度探针、向量写入、混合检索和 versioned reindex 演练。
 - ⏳ 独立恢复后针对真实业务 checkpoint/TaskTree/dispatch receipt/acceptance audit 的只读对账。
 - ⏳ 完整 24 小时墙钟运行、真机 smoke、FFmpeg/FFprobe 证据。
@@ -63,8 +67,10 @@
 | automation 注册 | ✅ 通过 | 13 条 manifest，health 显示 `automation_registered=13` |
 | 工作原则原子应用 | ✅ 通过 | 11 份 source/runtime hash 一致 |
 | 一致性在线备份 | ✅ 通过 | Online Backup + manifest + `PRAGMA integrity_check=ok` |
+| 历史 HR archive 备份覆盖 | ✅ 完成 | active/ex-employees/quarantine-employees 已纳入同一 644-file backup set，并通过独立恢复校验 |
 | 独立 SQLite 恢复演练 | ✅ 通过 | 合成 checkpoint/store/outbox/audit/dispatch/automation 对账通过 |
 | 隔离真实服务 verify | ✅ 通过 | memory-enabled、readiness 35/35、clean shutdown |
+| 本轮告警受控真实服务 verify | ✅ 通过 | profile/hook/API 正常，目标告警未复现，readiness 35/35，clean shutdown |
 | checkpoint 隔离 subprocess 恢复 | ✅ 通过 | `os._exit(87)` 后同 thread resume，副作用不重放 |
 | Provider 隔离 holding/resume | ✅ 通过 | 模拟 429，`os._exit(88)` 后 durable resume |
 | TaskTree/checkpoint reconciler | ✅ 通过 | resumable/missing/conflict/orphan + 第二次运行幂等 |
@@ -215,13 +221,14 @@ PASS=35 FAIL=0 WARN=0
 
 ## 5. 下一步执行顺序
 
-1. 配置受控云 embedding，完成模型/维度探针、sqlite-vec、混合检索、reindex 和结构化降级切换演练。
-2. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、backoff、优先级和恢复 UI。
-3. 申请安全维护窗口，创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
-4. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
-5. 将在线备份恢复到全新 data root，执行 TaskTree/checkpoint/store/outbox/dispatch/acceptance 的只读对账。
-6. 执行完整 24 小时墙钟演练和真机 smoke。
-7. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
+1. 只读对账正式 RuntimeStorage 中的 7 个 checkpoint conflict 和 25 条 memory outbox backlog，形成逐项处置建议，不删除、不重放、不修改 `iter_009`。
+2. 配置受控云 embedding，完成模型/维度探针、sqlite-vec、混合检索、reindex 和结构化降级切换演练。
+3. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、backoff、优先级和恢复 UI。
+4. 创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
+5. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
+6. 将在线备份恢复到全新 data root，执行 TaskTree/checkpoint/store/outbox/dispatch/acceptance 的只读对账。
+7. 执行完整 24 小时墙钟演练和真机 smoke。
+8. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
 
 ## 6. 上线判定
 
@@ -233,3 +240,7 @@ formal_24h_launch_allowed=false
 ```
 
 不得仅依据 readiness、P0 Gate、隔离 recovery tests、历史记忆或隔离服务 health 宣称 24 小时模式已正式上线。最终上线必须同时具备真实云 Provider、真实业务服务恢复、embedding/vector、24 小时墙钟、真机证据和显式 acceptance audit。
+
+## 2026-08-14 Runtime warning remediation execution
+
+Code remediation, audited formal skill reconciliation, historical record quarantine, system automation context isolation, authoritative automation/adhoc TaskTree paths, complete HR backup/restore verification, and a controlled repository-local service startup are complete. Full suite: `4677 passed, 5 skipped`; live readiness: `PASS=35 FAIL=0 WARN=0`. The target warnings did not recur, and active employee `00010` plus protected `iter_009` hashes remained unchanged. The service health snapshot exposed `checkpoint_conflicts=7` and `memory_worker_backlog=25`; these are separate formal-launch follow-up items and must be reconciled without deleting or replaying authoritative state. See `reports/RUNTIME-WARNING-REMEDIATION-20260814.md`.
