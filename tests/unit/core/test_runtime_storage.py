@@ -4,10 +4,21 @@ import asyncio
 import json
 import sqlite3
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
 from onemancompany.core.runtime_storage import RuntimeStorage
+
+
+def test_pytest_cannot_open_repository_formal_runtime_database(monkeypatch):
+    """A missed fixture must fail closed before touching the formal runtime DB."""
+    repository_root = Path(__file__).resolve().parents[3]
+    formal_database = repository_root / ".onemancompany" / "data" / "runtime.sqlite3"
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "formal-runtime-guard")
+
+    with pytest.raises(RuntimeError, match="formal runtime database"):
+        RuntimeStorage(formal_database)
 
 
 @pytest.mark.asyncio
@@ -188,6 +199,9 @@ async def test_vector_memory_store_uses_sqlite_vec_and_rejects_dimension_drift(t
             limit=1,
         )
         assert rows and rows[0].key == "m-vector"
+        async with storage._store_conn.execute("SELECT vec_version()") as cursor:
+            sqlite_vec_version = await cursor.fetchone()
+        assert sqlite_vec_version[0] == "v0.1.9"
         tables = await storage.list_tables()
         assert "vector_migrations" in tables
     finally:
@@ -358,3 +372,167 @@ async def test_side_effect_ledger_requires_reconciliation_for_uncertain_prepared
         assert failed_error.value.invocation["status"] == "failed"
     finally:
         await storage.close()
+
+@pytest.mark.asyncio
+async def test_memory_index_rejects_model_identity_drift_within_one_version(tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    path = tmp_path / "runtime.sqlite3"
+    first = RuntimeStorage(path)
+    await first.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "fake-model-a",
+        "provider_fingerprint": "provider-a",
+    })
+    await first.close()
+
+    drifted = RuntimeStorage(path)
+    with pytest.raises(ValueError, match="configuration mismatch"):
+        await drifted.initialize(memory_index={
+            "dims": 4,
+            "embed": DeterministicFakeEmbedding(size=4),
+            "text_fields": ["text"],
+            "index_version": "v1",
+            "embedding_model": "fake-model-b",
+            "provider_fingerprint": "provider-a",
+        })
+    await drifted.close()
+
+
+@pytest.mark.asyncio
+async def test_versioned_reindex_uses_shadow_vectors_and_atomic_active_switch(tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+    from onemancompany.core.memory_service import MemoryService
+
+    path = tmp_path / "runtime.sqlite3"
+    first = RuntimeStorage(path)
+    await first.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "fake-model",
+        "provider_fingerprint": "provider-a",
+    })
+    await MemoryService(first).propose(
+        employee_id="00008",
+        memory_type="episodic",
+        subject="recovery",
+        text="checkpoint recovery evidence",
+    )
+    await first.close()
+
+    second = RuntimeStorage(path)
+    await second.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v2",
+        "embedding_model": "fake-model",
+        "provider_fingerprint": "provider-a",
+    })
+    try:
+        before = await second.memory_index_status()
+        assert before["active_version"] == "v1"
+        assert before["target_version"] == "v2"
+        assert before["vector_enabled"] is True
+        assert before["reindex_required"] is True
+        pre_switch = await MemoryService(second).search(
+            employee_id="00008", query="checkpoint recovery"
+        )
+        assert pre_switch and pre_switch[0]["score"] is not None
+
+        result = await second.reindex_memory_index(from_version="v1", to_version="v2")
+
+        assert result == {
+            "status": "completed",
+            "mode": "atomic_shadow_rebuild",
+            "from_version": "v1",
+            "to_version": "v2",
+            "memory_count": 1,
+            "vector_count": 1,
+        }
+        after = await second.memory_index_status()
+        assert after["active_version"] == "v2"
+        assert after["vector_enabled"] is True
+        assert after["reindex_required"] is False
+        active = await second.fetchall(
+            "SELECT index_version FROM memory_index_config WHERE active=1"
+        )
+        assert [row[0] for row in active] == ["v2"]
+        archived = await second.fetchall(
+            "SELECT index_version,COUNT(*) FROM memory_vector_versions "
+            "GROUP BY index_version ORDER BY index_version"
+        )
+        assert [tuple(row) for row in archived] == [("v1", 1), ("v2", 1)]
+        memory = await second.fetchone("SELECT value FROM store LIMIT 1")
+        value = json.loads(memory[0])
+        assert value["embedding_status"] == "indexed"
+        assert value["embedding_index_version"] == "v2"
+    finally:
+        await second.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_reindex_preserves_active_vectors_and_outbox(tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+    from onemancompany.core.memory_service import MemoryService
+
+    class FailingEmbedding(DeterministicFakeEmbedding):
+        async def aembed_documents(self, texts):
+            raise RuntimeError("embedding unavailable")
+
+    path = tmp_path / "runtime.sqlite3"
+    first = RuntimeStorage(path)
+    await first.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "fake-model-v1",
+        "provider_fingerprint": "provider-a",
+    })
+    await MemoryService(first).propose(
+        employee_id="00008",
+        memory_type="episodic",
+        subject="recovery",
+        text="checkpoint recovery evidence",
+    )
+    await first.enqueue_memory_outbox(
+        namespace=("employee", "00008", "episodic"),
+        memory_key="pending-memory",
+        payload={"text": "not consumed"},
+        event_id="pending-event",
+    )
+    old_vector_count = int((await first.fetchone("SELECT COUNT(*) FROM store_vectors"))[0])
+    await first.close()
+
+    second = RuntimeStorage(path)
+    await second.initialize(memory_index={
+        "dims": 4,
+        "embed": FailingEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v2",
+        "embedding_model": "fake-model-v2",
+        "provider_fingerprint": "provider-a",
+    })
+    try:
+        assert second.memory_vector_enabled is False
+        with pytest.raises(RuntimeError, match="embedding unavailable"):
+            await second.reindex_memory_index(from_version="v1", to_version="v2")
+
+        assert second.memory_index_version == "v1"
+        assert int((await second.fetchone("SELECT COUNT(*) FROM store_vectors"))[0]) == old_vector_count
+        active = await second.fetchone(
+            "SELECT index_version FROM memory_index_config WHERE active=1"
+        )
+        assert active[0] == "v1"
+        outbox = await second.fetchone(
+            "SELECT status,attempt FROM memory_outbox WHERE event_id='pending-event'"
+        )
+        assert tuple(outbox) == ("pending", 0)
+    finally:
+        await second.close()

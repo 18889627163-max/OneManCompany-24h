@@ -24,6 +24,34 @@ if not DATA_ROOT.is_absolute():
     DATA_ROOT = (Path.cwd() / DATA_ROOT).resolve()
 
 
+def resolve_runtime_database_path(configured_path: str | Path) -> Path:
+    """Resolve the runtime SQLite path inside the configured data boundary.
+
+    ``OMC_MEMORY_DATABASE_PATH`` historically defaulted to
+    ``.onemancompany/data/runtime.sqlite3``.  When ``OMC_DATA_ROOT`` redirects
+    the process, preserving that literal path under the current working
+    directory defeats isolation.  Treat the legacy ``.onemancompany/`` prefix
+    as relative to ``DATA_ROOT`` and anchor every other relative path there as
+    well.  Absolute paths remain an explicit operator choice.
+    """
+    path = Path(configured_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+
+    parts = path.parts
+    if parts and parts[0] == DATA_DIR_NAME:
+        path = Path(*parts[1:])
+    resolved_root = DATA_ROOT.expanduser().resolve()
+    resolved = (resolved_root / path).resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"relative runtime database path escapes OMC_DATA_ROOT: {configured_path}"
+        ) from exc
+    return resolved
+
+
 COMPANY_DIR = DATA_ROOT / "company"
 
 # ---------------------------------------------------------------------------

@@ -240,35 +240,77 @@ async def test_admin_supersede_rejects_missing_or_unverified_target(storage, mon
 
 
 @pytest.mark.asyncio
-async def test_admin_reindex_and_checkpoint_prune_are_controlled_contracts(storage, monkeypatch):
+async def test_admin_reindex_and_checkpoint_prune_are_controlled_contracts(tmp_path, monkeypatch):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
     monkeypatch.setattr(config_mod.settings, "omc_admin_token", "admin-secret")
     monkeypatch.setattr(config_mod.settings, "omc_memory_enabled", True)
-    await storage.enqueue_memory_outbox(
+    path = tmp_path / "runtime.sqlite3"
+    first = RuntimeStorage(path)
+    await first.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "fake-model",
+        "provider_fingerprint": "provider-a",
+    })
+    await MemoryService(first).propose(
+        employee_id="00008",
+        memory_type="episodic",
+        subject="recovery",
+        text="checkpoint recovery",
+    )
+    await first.enqueue_memory_outbox(
         namespace=("employee", "00008", "episodic"),
         memory_key="node:episodic:hash",
         payload={"token": "outbox-secret", "text": "password=payload-secret"},
         event_id="outbox-event",
     )
+    await first.close()
+
+    storage = RuntimeStorage(path)
+    await storage.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v2",
+        "embedding_model": "fake-model",
+        "provider_fingerprint": "provider-a",
+    })
     app = _app(storage)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app, client=("127.0.0.1", 1234)),
-        base_url="http://test",
-    ) as client:
-        reindex = await client.post(
-            "/api/admin/memory/reindex",
-            params={"from_version": "v1", "to_version": "v2"},
-            headers=_headers(),
-        )
-        prune = await client.post(
-            "/api/admin/checkpoints/prune",
-            params={"older_than_days": 30},
-            headers=_headers(),
-        )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app, client=("127.0.0.1", 1234)),
+            base_url="http://test",
+        ) as client:
+            reindex = await client.post(
+                "/api/admin/memory/reindex",
+                params={"from_version": "v1", "to_version": "v2"},
+                headers=_headers(),
+            )
+            status = await client.get(
+                "/api/admin/memory/status",
+                headers=_headers(),
+            )
+            prune = await client.post(
+                "/api/admin/checkpoints/prune",
+                params={"older_than_days": 30},
+                headers=_headers(),
+            )
+    finally:
+        await storage.close()
 
     assert reindex.status_code == prune.status_code == 200
-    assert reindex.json()["status"] == "accepted"
-    assert reindex.json()["mode"] == "outbox_job_contract"
+    assert reindex.json()["status"] == "completed"
+    assert reindex.json()["mode"] == "atomic_shadow_rebuild"
+    assert reindex.json()["from_version"] == "v1"
+    assert reindex.json()["to_version"] == "v2"
+    assert status.status_code == 200
+    assert status.json()["active_version"] == "v2"
+    assert status.json()["reindex_required"] is False
+    assert status.json()["memory_worker_backlog"] == 1
     assert prune.json()["status"] == "dry_run"
     assert prune.json()["older_than_days"] == 30
     combined = reindex.text + prune.text

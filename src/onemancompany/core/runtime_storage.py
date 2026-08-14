@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import sqlite_vec
 from loguru import logger
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.store.base.embed import get_text_at_path, tokenize_path
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _OWNED_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -33,9 +35,24 @@ CREATE TABLE IF NOT EXISTS memory_index_config (
     index_version TEXT PRIMARY KEY,
     dimensions INTEGER NOT NULL,
     text_fields_json TEXT NOT NULL,
+    embedding_model TEXT NOT NULL DEFAULT '',
+    provider_fingerprint TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
+    activated_at TEXT,
     active INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS memory_vector_versions (
+    index_version TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    key TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(index_version, prefix, key, field_name)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_vector_versions_lookup
+    ON memory_vector_versions(index_version, prefix, key);
 CREATE TABLE IF NOT EXISTS provider_queue (
     request_id TEXT PRIMARY KEY,
     group_key TEXT NOT NULL,
@@ -232,6 +249,7 @@ class RuntimeStorage:
 
     def __init__(self, db_path: str | Path = ".onemancompany/data/runtime.sqlite3") -> None:
         self.db_path = Path(db_path).expanduser().resolve()
+        self._reject_formal_database_during_pytest()
         self._conn: aiosqlite.Connection | None = None
         self._checkpoint_conn: aiosqlite.Connection | None = None
         self._store_conn: aiosqlite.Connection | None = None
@@ -242,6 +260,27 @@ class RuntimeStorage:
         self._initialized = False
         self.memory_vector_enabled = False
         self.memory_index_version = "v1"
+        self.memory_index_target_version: str | None = None
+        self.memory_reindex_required = False
+        self._memory_index_config: dict[str, Any] | None = None
+        self._memory_index_lock = asyncio.Lock()
+
+    def _reject_formal_database_during_pytest(self) -> None:
+        """Fail closed if a test accidentally targets the repository runtime DB.
+
+        Test fixtures should always pass a temporary database path.  This
+        last-line guard prevents a missed or late fixture from applying schema
+        migrations to the formal runtime database again.
+        """
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        repository_root = Path(__file__).resolve().parents[3]
+        formal_database = (repository_root / ".onemancompany" / "data" / "runtime.sqlite3").resolve()
+        if self.db_path == formal_database:
+            raise RuntimeError(
+                "pytest attempted to open the repository formal runtime database; "
+                "configure an explicit temporary OMC_DATA_ROOT or database path"
+            )
 
     @staticmethod
     def _normalize_memory_index(memory_index: dict | None) -> dict | None:
@@ -255,33 +294,133 @@ class RuntimeStorage:
             raise ValueError("memory vector index requires dims")
         config["dims"] = int(dimensions)
         config["text_fields"] = list(config.get("text_fields") or ["text"])
+        embedder = config.get("embed")
+        config["embedding_model"] = str(
+            config.get("embedding_model")
+            or (
+                f"{type(embedder).__module__}.{type(embedder).__qualname__}"
+                if embedder is not None
+                else ""
+            )
+        ).strip()
+        config["provider_fingerprint"] = str(
+            config.get("provider_fingerprint") or "local-or-unspecified"
+        ).strip()
+        if not config["embedding_model"]:
+            raise ValueError("memory vector index requires embedding_model")
         return config
 
-    async def _validate_memory_index(self, memory_index: dict | None) -> None:
-        """Persist and fail closed on embedding dimension/index-version drift."""
+    async def _migrate_owned_schema(self) -> None:
+        """Apply additive OMC-owned migrations without touching LangGraph tables."""
+        columns = {
+            str(row[1])
+            for row in await (
+                await self._conn.execute("PRAGMA table_info(memory_index_config)")
+            ).fetchall()
+        }
+        additions = {
+            "embedding_model": "TEXT NOT NULL DEFAULT ''",
+            "provider_fingerprint": "TEXT NOT NULL DEFAULT ''",
+            "activated_at": "TEXT",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                await self._conn.execute(
+                    f"ALTER TABLE memory_index_config ADD COLUMN {name} {definition}"
+                )
+        # Earlier code marked every newly seen version active. Preserve the most
+        # recent row as the only active contract before enforcing versioned use.
+        active_rows = await (
+            await self._conn.execute(
+                "SELECT index_version FROM memory_index_config WHERE active=1 "
+                "ORDER BY COALESCE(activated_at,created_at) DESC, index_version DESC"
+            )
+        ).fetchall()
+        if len(active_rows) > 1:
+            keep = str(active_rows[0][0])
+            await self._conn.execute(
+                "UPDATE memory_index_config SET active=CASE WHEN index_version=? THEN 1 ELSE 0 END",
+                (keep,),
+            )
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (_SCHEMA_VERSION, iso_now()),
+        )
+        await self._conn.commit()
+
+    async def _validate_memory_index(self, memory_index: dict | None) -> dict[str, Any]:
+        """Persist the requested contract and identify the safe active version.
+
+        A different version is registered as an inactive reindex target. It is
+        never allowed to query or overwrite vectors from the active version.
+        """
+        active_cursor = await self._conn.execute(
+            "SELECT index_version,dimensions,text_fields_json,embedding_model,"
+            "provider_fingerprint FROM memory_index_config WHERE active=1 LIMIT 1"
+        )
+        active_row = await active_cursor.fetchone()
+        await active_cursor.close()
         if memory_index is None:
-            return
+            return {
+                "active_version": str(active_row[0]) if active_row else None,
+                "requested_version": None,
+                "usable": False,
+                "reindex_required": False,
+            }
         version = str(memory_index.get("index_version") or "v1")
         dimensions = int(memory_index["dims"])
         fields_json = json.dumps(memory_index["text_fields"], ensure_ascii=False, sort_keys=True)
+        embedding_model = str(memory_index["embedding_model"])
+        provider_fingerprint = str(memory_index["provider_fingerprint"])
         row = await self._conn.execute(
-            "SELECT dimensions,text_fields_json FROM memory_index_config WHERE index_version=?",
+            "SELECT dimensions,text_fields_json,embedding_model,provider_fingerprint,active "
+            "FROM memory_index_config WHERE index_version=?",
             (version,),
         )
         existing = await row.fetchone()
         await row.close()
-        if existing and (int(existing[0]) != dimensions or str(existing[1]) != fields_json):
+        requested_contract = (dimensions, fields_json, embedding_model, provider_fingerprint)
+        existing_contract = tuple(existing[:4]) if existing else None
+        if existing and existing_contract != requested_contract:
             raise ValueError(
                 f"memory index {version} configuration mismatch: "
-                f"existing dims={existing[0]}, fields={existing[1]}; "
-                f"requested dims={dimensions}, fields={fields_json}"
+                f"existing dims={existing[0]}, fields={existing[1]}, model={existing[2]}, "
+                f"provider={existing[3]}; requested dims={dimensions}, fields={fields_json}, "
+                f"model={embedding_model}, provider={provider_fingerprint}"
             )
         if not existing:
+            activate = 0 if active_row else 1
+            now = iso_now()
             await self._conn.execute(
-                "INSERT INTO memory_index_config(index_version,dimensions,text_fields_json,created_at,active) VALUES (?,?,?,?,1)",
-                (version, dimensions, fields_json, iso_now()),
+                "INSERT INTO memory_index_config(index_version,dimensions,text_fields_json,"
+                "embedding_model,provider_fingerprint,created_at,activated_at,active) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    version,
+                    dimensions,
+                    fields_json,
+                    embedding_model,
+                    provider_fingerprint,
+                    now,
+                    now if activate else None,
+                    activate,
+                ),
             )
             await self._conn.commit()
+            if activate:
+                active_row = (version, dimensions, fields_json, embedding_model, provider_fingerprint)
+        active_version = str(active_row[0]) if active_row else version
+        active_contract = tuple(active_row[1:5]) if active_row else requested_contract
+        # A pure version-label bump over the same vector space may keep serving
+        # the old index during shadow rebuild. Model/provider/dimension changes
+        # fall back to structured retrieval until the atomic switch completes.
+        usable = active_version == version or active_contract == requested_contract
+        return {
+            "active_version": active_version,
+            "requested_version": version,
+            "usable": usable,
+            "reindex_required": active_version != version,
+        }
 
     async def initialize(self, *, memory_index: dict | None = None) -> None:
         if self._initialized:
@@ -295,14 +434,22 @@ class RuntimeStorage:
             for conn in (self._conn, self._checkpoint_conn, self._store_conn):
                 await self._configure(conn)
             await self._conn.executescript(_OWNED_SCHEMA)
-            await self._conn.execute(
-                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                (_SCHEMA_VERSION, iso_now()),
-            )
+            await self._migrate_owned_schema()
             normalized_index = self._normalize_memory_index(memory_index)
-            await self._validate_memory_index(normalized_index)
-            self.memory_vector_enabled = normalized_index is not None
-            self.memory_index_version = str((normalized_index or {}).get("index_version") or "v1")
+            index_state = await self._validate_memory_index(normalized_index)
+            self._memory_index_config = normalized_index
+            self.memory_vector_enabled = bool(normalized_index and index_state["usable"])
+            self.memory_index_version = str(
+                index_state.get("active_version")
+                or (normalized_index or {}).get("index_version")
+                or "v1"
+            )
+            self.memory_index_target_version = (
+                str(index_state["requested_version"])
+                if index_state.get("requested_version")
+                else None
+            )
+            self.memory_reindex_required = bool(index_state["reindex_required"])
             # Queued/running Python callables cannot survive restart. Preserve their
             # metadata and make reconciliation explicit rather than claiming success.
             await self._conn.execute(
@@ -317,7 +464,7 @@ class RuntimeStorage:
             if normalized_index is not None:
                 store_index = {
                     key: value for key, value in normalized_index.items()
-                    if key != "index_version"
+                    if key in {"dims", "embed", "text_fields"}
                 }
             self.memory_store = AsyncSqliteStore(self._store_conn, index=store_index)
             await self.checkpointer.setup()
@@ -372,8 +519,206 @@ class RuntimeStorage:
         self._loop = None
         self._initialized = False
         self.memory_vector_enabled = False
+        self.memory_index_target_version = None
+        self.memory_reindex_required = False
+        self._memory_index_config = None
         if first_error is not None:
             raise first_error
+
+    async def put_memory(
+        self,
+        namespace: tuple[str, ...],
+        key: str,
+        value: dict[str, Any],
+        *,
+        index: list[str] | bool | None = None,
+    ) -> None:
+        """Serialize memory writes against an atomic vector index switch."""
+        if self.memory_store is None:
+            raise RuntimeError("memory store is not initialized")
+        async with self._memory_index_lock:
+            await self.memory_store.aput(namespace, key, value, index=index)
+
+    async def memory_index_status(self) -> dict[str, Any]:
+        """Return a sanitized version/index state for health and administration."""
+        rows = await self.fetchall(
+            "SELECT index_version,dimensions,embedding_model,active,created_at,activated_at "
+            "FROM memory_index_config ORDER BY created_at,index_version"
+        )
+        return {
+            "active_version": self.memory_index_version if rows else None,
+            "target_version": self.memory_index_target_version,
+            "vector_enabled": self.memory_vector_enabled,
+            "reindex_required": self.memory_reindex_required,
+            "versions": [
+                {
+                    "index_version": str(row[0]),
+                    "dimensions": int(row[1]),
+                    "embedding_model": str(row[2]),
+                    "active": bool(row[3]),
+                    "created_at": row[4],
+                    "activated_at": row[5],
+                }
+                for row in rows
+            ],
+        }
+
+    async def reindex_memory_index(
+        self,
+        *,
+        from_version: str = "",
+        to_version: str = "",
+        batch_size: int = 64,
+    ) -> dict[str, Any]:
+        """Build a shadow vector version and atomically switch active vectors.
+
+        Structured memory and the current ``store_vectors`` remain readable while
+        embeddings are generated. Memory writes are briefly serialized so no item
+        can be omitted between the snapshot and switch. Failed builds leave the
+        active vectors, active contract and Memory Outbox untouched.
+        """
+        if self.memory_store is None or self._store_conn is None:
+            raise RuntimeError("memory store is not initialized")
+        target = self._memory_index_config
+        if not target or self.memory_store.embeddings is None:
+            raise RuntimeError("configured embedding index is unavailable")
+        active_version = self.memory_index_version
+        requested_target = str(target.get("index_version") or "")
+        source_version = str(from_version or active_version)
+        target_version = str(to_version or requested_target)
+        if source_version != active_version:
+            raise ValueError(
+                f"reindex source must be active version {active_version}, got {source_version}"
+            )
+        if target_version != requested_target:
+            raise ValueError(
+                f"reindex target must match configured version {requested_target}, got {target_version}"
+            )
+        batch_size = max(1, min(int(batch_size), 512))
+        dimensions = int(target["dims"])
+        tokenized_fields = [
+            (field, tokenize_path(field)) for field in target["text_fields"]
+        ]
+
+        async with self._memory_index_lock:
+            # Snapshot structured rows while writes are fenced. External embedding
+            # calls happen with no SQLite transaction open.
+            async with self._store_conn.execute(
+                "SELECT prefix,key,value FROM store ORDER BY prefix,key"
+            ) as cursor:
+                store_rows = await cursor.fetchall()
+            requests: list[tuple[str, str, str, str]] = []
+            for prefix, key, raw_value in store_rows:
+                value = json.loads(raw_value)
+                for field, tokenized_path in tokenized_fields:
+                    texts = get_text_at_path(value, tokenized_path)
+                    for position, text in enumerate(texts):
+                        pathname = f"{field}.{position}" if len(texts) > 1 else field
+                        requests.append((str(prefix), str(key), pathname, text))
+
+            staged: list[tuple[str, str, str, str, bytes, str, str]] = []
+            now = iso_now()
+            for offset in range(0, len(requests), batch_size):
+                chunk = requests[offset : offset + batch_size]
+                vectors = await self.memory_store.embeddings.aembed_documents(
+                    [item[3] for item in chunk]
+                )
+                if len(vectors) != len(chunk):
+                    raise ValueError("embedding provider returned an incomplete reindex batch")
+                for (prefix, key, pathname, _), vector in zip(chunk, vectors, strict=True):
+                    if len(vector) != dimensions:
+                        raise ValueError(
+                            "memory embedding dimension mismatch during reindex: "
+                            f"configured={dimensions}, actual={len(vector)}"
+                        )
+                    staged.append(
+                        (
+                            target_version,
+                            prefix,
+                            key,
+                            pathname,
+                            sqlite_vec.serialize_float32(vector),
+                            now,
+                            now,
+                        )
+                    )
+
+            # LangGraph serializes store reads/writes with this lock. The switch,
+            # archived source snapshot and active-version metadata update are one
+            # SQLite transaction on the same connection.
+            async with self.memory_store.lock:
+                await self._store_conn.execute("BEGIN IMMEDIATE")
+                try:
+                    active_row = await (
+                        await self._store_conn.execute(
+                            "SELECT index_version FROM memory_index_config WHERE active=1 LIMIT 1"
+                        )
+                    ).fetchone()
+                    if not active_row or str(active_row[0]) != source_version:
+                        raise RuntimeError("active memory index changed during reindex")
+                    await self._store_conn.execute(
+                        "DELETE FROM memory_vector_versions WHERE index_version=?",
+                        (target_version,),
+                    )
+                    if source_version != target_version:
+                        await self._store_conn.execute(
+                            "INSERT OR REPLACE INTO memory_vector_versions("
+                            "index_version,prefix,key,field_name,embedding,created_at,updated_at) "
+                            "SELECT ?,prefix,key,field_name,embedding,created_at,updated_at "
+                            "FROM store_vectors",
+                            (source_version,),
+                        )
+                    if staged:
+                        await self._store_conn.executemany(
+                            "INSERT INTO memory_vector_versions(index_version,prefix,key,field_name,"
+                            "embedding,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+                            staged,
+                        )
+                    await self._store_conn.execute("DELETE FROM store_vectors")
+                    await self._store_conn.execute(
+                        "INSERT INTO store_vectors(prefix,key,field_name,embedding,created_at,updated_at) "
+                        "SELECT prefix,key,field_name,embedding,created_at,updated_at "
+                        "FROM memory_vector_versions WHERE index_version=?",
+                        (target_version,),
+                    )
+                    await self._store_conn.execute(
+                        "UPDATE memory_index_config SET active=0 WHERE active=1"
+                    )
+                    await self._store_conn.execute(
+                        "UPDATE memory_index_config SET active=1,activated_at=? WHERE index_version=?",
+                        (now, target_version),
+                    )
+                    await self._store_conn.execute(
+                        "UPDATE store SET value=json_set(CAST(value AS TEXT),"
+                        "'$.embedding_status','indexed','$.embedding_index_version',?),"
+                        "updated_at=CURRENT_TIMESTAMP",
+                        (target_version,),
+                    )
+                    await self._store_conn.commit()
+                except BaseException:
+                    await self._store_conn.rollback()
+                    raise
+
+            self.memory_index_version = target_version
+            self.memory_vector_enabled = True
+            self.memory_reindex_required = False
+            await self.append_audit(
+                "memory_index_reindexed",
+                {
+                    "from_version": source_version,
+                    "to_version": target_version,
+                    "memory_count": len(store_rows),
+                    "vector_count": len(staged),
+                },
+            )
+            return {
+                "status": "completed",
+                "mode": "atomic_shadow_rebuild",
+                "from_version": source_version,
+                "to_version": target_version,
+                "memory_count": len(store_rows),
+                "vector_count": len(staged),
+            }
 
     def run_sync(self, coroutine):
         """Run a storage coroutine from a synchronous tool worker.

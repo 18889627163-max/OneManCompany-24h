@@ -308,3 +308,66 @@ async def test_worker_failure_holds_event_without_failing_business_state(storage
     assert row[0] == "holding"
     assert row[1] == "RuntimeError"
     assert row[2]
+
+@pytest.mark.asyncio
+async def test_vector_search_filters_verified_status_before_similarity_limit(tmp_path):
+    from langchain_core.embeddings import Embeddings
+
+    class ControlledEmbedding(Embeddings):
+        def embed_documents(self, texts):
+            return [self.embed_query(text) for text in texts]
+
+        def embed_query(self, text):
+            return [0.9, 0.1] if "verified target" in text else [1.0, 0.0]
+
+        async def aembed_documents(self, texts):
+            return self.embed_documents(texts)
+
+        async def aembed_query(self, text):
+            return self.embed_query(text)
+
+    vector_storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await vector_storage.initialize(memory_index={
+        "dims": 2,
+        "embed": ControlledEmbedding(),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "controlled-test",
+        "provider_fingerprint": "local-test",
+    })
+    try:
+        namespace = ("employee", "00008", "episodic")
+        for index in range(20):
+            await vector_storage.put_memory(
+                namespace,
+                f"candidate-{index}",
+                {
+                    "memory_id": f"candidate-{index}",
+                    "scope": "employee",
+                    "namespace_id": "00008",
+                    "status": "candidate",
+                    "text": f"candidate {index}",
+                    "created_at": "2026-08-14T00:00:00+00:00",
+                },
+            )
+        await vector_storage.put_memory(
+            namespace,
+            "verified-target",
+            {
+                "memory_id": "verified-target",
+                "scope": "employee",
+                "namespace_id": "00008",
+                "status": "active",
+                "text": "verified target",
+                "created_at": "2026-08-14T00:00:00+00:00",
+            },
+        )
+
+        rows = await MemoryService(vector_storage).search(
+            employee_id="00008", query="candidate query", limit=1
+        )
+
+        assert [row["memory_id"] for row in rows] == ["verified-target"]
+        assert rows[0]["score"] is not None
+    finally:
+        await vector_storage.close()

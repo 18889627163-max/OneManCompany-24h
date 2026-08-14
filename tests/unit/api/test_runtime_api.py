@@ -36,6 +36,9 @@ async def test_runtime_health_reports_sanitized_unavailable_state(monkeypatch):
         "memory_store": "disabled",
         "sqlite_vec": "disabled",
         "embedding": "disabled",
+        "memory_index_active_version": None,
+        "memory_index_target_version": None,
+        "memory_reindex_required": False,
         "provider_gateway": "degraded",
         "automation_registry": "unavailable",
         "automation_registered": 0,
@@ -45,6 +48,8 @@ async def test_runtime_health_reports_sanitized_unavailable_state(monkeypatch):
         "memory_worker_backlog": 0,
         "oldest_memory_event_at": None,
         "checkpoint_conflicts": 0,
+        "checkpoint_findings_total": 0,
+        "checkpoint_legacy_system_orphans": 0,
     }
 
 
@@ -139,5 +144,81 @@ async def test_runtime_backup_resolves_relative_directory_under_data_root(monkey
         assert Path(data["manifest_path"]).parent == expected_dir
         assert (expected_dir / data["database_file"]).is_file()
         assert (expected_dir / data["manifest_file"]).is_file()
+    finally:
+        await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_reconciliation_separates_legacy_system_orphans_and_redacts_payload(
+    monkeypatch, tmp_path
+):
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize()
+    try:
+        monkeypatch.setattr(config_mod.settings, "omc_admin_token", "admin-secret")
+        await storage.record_recovery(
+            node_id="legacy-node",
+            tree_path="",
+            mode="standard",
+            expected_status="task_node_exists",
+            reason="checkpoint_without_tasktree_node",
+            execution_generation=1,
+            checkpoint_thread_id=(
+                "omc:_sys_automation_health-check:unknown-iteration:legacy-node:g1"
+            ),
+            status="orphan",
+        )
+        await storage.record_recovery(
+            node_id="formal-node",
+            tree_path="",
+            mode="standard",
+            expected_status="task_node_exists",
+            reason="checkpoint_without_tasktree_node",
+            execution_generation=1,
+            checkpoint_thread_id="omc:project-a:iter_001:formal-node:g1",
+            status="orphan",
+        )
+        await storage.execute(
+            "INSERT INTO memory_outbox(event_id,namespace_json,memory_key,payload_json,status,created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                "evt-system",
+                '["employee","00008","episodic"]',
+                "system-key",
+                '{"employee_id":"00008","scope":"employee","memory_type":"episodic",'
+                '"project_id":"_sys_automation_health-check","source_node_id":"node-1",'
+                '"token":"never-return"}',
+                "pending",
+                "2026-08-14T00:00:00+00:00",
+            ),
+        )
+        app = _app(storage)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            denied = await client.get("/api/admin/runtime/reconciliation")
+            response = await client.get(
+                "/api/admin/runtime/reconciliation",
+                headers={"X-OMC-Admin-Token": "admin-secret"},
+            )
+            health = await client.get("/api/runtime/health")
+
+        assert denied.status_code == 401
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "read_only"
+        assert data["checkpoint_findings_total"] == 2
+        assert data["checkpoint_actionable"] == 1
+        assert data["checkpoint_legacy_system_orphans"] == 1
+        assert data["memory_outbox_backlog"] == 1
+        assert data["memory_outbox_by_project_kind"] == {"system_automation": 1}
+        assert data["memory_outbox_unattempted"] == 1
+        assert data["memory_outbox_missing_evidence"] == 1
+        assert "never-return" not in response.text
+        assert "system-key" not in response.text
+        health_data = health.json()
+        assert health_data["checkpoint_conflicts"] == 1
+        assert health_data["checkpoint_findings_total"] == 2
+        assert health_data["checkpoint_legacy_system_orphans"] == 1
     finally:
         await storage.close()

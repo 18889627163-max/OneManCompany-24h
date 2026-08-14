@@ -342,8 +342,11 @@ def _isolate_disk_writes(tmp_path, monkeypatch):
     # Keep the final path shape ``.../employees/<id>/workspace`` for tests that
     # assert workspace locations, but avoid colliding with module fixtures that
     # use ``tmp_path/employees`` as their own registry.
-    emp_dir = tmp_path / "runtime" / "employees"
+    runtime_root = tmp_path / "runtime"
+    emp_dir = runtime_root / "employees"
+    ex_emp_dir = runtime_root / "ex-employees"
     emp_dir.mkdir(parents=True, exist_ok=True)
+    ex_emp_dir.mkdir(parents=True, exist_ok=True)
 
     import onemancompany.core.config as config_mod
     import onemancompany.core.store as store_mod
@@ -351,6 +354,16 @@ def _isolate_disk_writes(tmp_path, monkeypatch):
     import onemancompany.core.task_persistence as tp_mod
     import onemancompany.core.automation as automation_mod
     import onemancompany.core.conversation as conversation_mod
+    import onemancompany.core.memory_service as memory_service_mod
+
+    # Full FastAPI lifespan tests use the global settings singleton.  Redirect
+    # its runtime database before lifespan startup so schema setup can never
+    # reach the repository's formal .onemancompany/data/runtime.sqlite3.
+    monkeypatch.setattr(
+        config_mod.settings,
+        "omc_memory_database_path",
+        str(tmp_path / "runtime" / "runtime.sqlite3"),
+    )
     # Clear leaked cron tasks before each test. A cron created by a prior test can
     # otherwise outlive that test and write to the production employee directory
     # after monkeypatch teardown.
@@ -362,10 +375,18 @@ def _isolate_disk_writes(tmp_path, monkeypatch):
     # Keep store path matching the config path. Generic path dirty detection
     # builds its registry from config, while task-index helpers use store.
     monkeypatch.setattr(store_mod, "EMPLOYEES_DIR", emp_dir)
+    monkeypatch.setattr(store_mod, "EX_EMPLOYEES_DIR", ex_emp_dir)
 
     # Redirect the config source used by runtime imports (for example
     # routes._push_adhoc_task imports EMPLOYEES_DIR inside the function).
     monkeypatch.setattr(config_mod, "EMPLOYEES_DIR", emp_dir)
+    monkeypatch.setattr(config_mod, "EX_EMPLOYEES_DIR", ex_emp_dir)
+
+    # Memory access policy captures both registry paths at import time.  Leaving
+    # EX_EMPLOYEES_DIR unpatched lets termination tests write archived profiles
+    # into the repository's formal runtime directory.
+    monkeypatch.setattr(memory_service_mod, "EMPLOYEES_DIR", emp_dir)
+    monkeypatch.setattr(memory_service_mod, "EX_EMPLOYEES_DIR", ex_emp_dir)
 
     # Redirect modules that captured EMPLOYEES_DIR at import time.
     monkeypatch.setattr(automation_mod, "EMPLOYEES_DIR", emp_dir)

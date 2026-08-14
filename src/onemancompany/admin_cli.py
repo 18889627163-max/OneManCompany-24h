@@ -10,7 +10,14 @@ import urllib.parse
 import urllib.request
 
 
-def _request(method: str, path: str, *, params: dict | None = None, body: dict | None = None) -> int:
+def _request(
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+    timeout: float = 15,
+) -> int:
     base = os.environ.get("OMC_ADMIN_URL", "http://127.0.0.1:8000").rstrip("/")
     url = base + path
     if params:
@@ -21,7 +28,7 @@ def _request(method: str, path: str, *, params: dict | None = None, body: dict |
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             payload = json.load(response)
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
@@ -39,11 +46,15 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="resource", required=True)
     memory = sub.add_parser("memory")
     memory_sub = memory.add_subparsers(dest="action", required=True)
+    memory_sub.add_parser("status")
     ls = memory_sub.add_parser("list"); ls.add_argument("--status", default=""); ls.add_argument("--scope", default="")
     detail = memory_sub.add_parser("detail"); detail.add_argument("memory_id")
     for action in ("approve", "reject", "supersede"):
         cmd = memory_sub.add_parser(action); cmd.add_argument("memory_id"); cmd.add_argument("--reason", "--notes", dest="notes", default=""); cmd.add_argument("--superseded-by", default="")
     reindex = memory_sub.add_parser("reindex"); reindex.add_argument("--from", dest="from_version", default=""); reindex.add_argument("--to", dest="to_version", default="")
+    runtime = sub.add_parser("runtime")
+    runtime_sub = runtime.add_subparsers(dest="action", required=True)
+    runtime_sub.add_parser("reconciliation")
     checkpoint = sub.add_parser("checkpoint")
     cp_sub = checkpoint.add_subparsers(dest="action", required=True)
     prune = cp_sub.add_parser("prune"); prune.add_argument("--older-than", type=int, default=30); prune.add_argument("--execute", action="store_true")
@@ -79,13 +90,21 @@ def main(argv: list[str] | None = None) -> int:
             "/api/admin/skills/reconcile",
             body={"employee_id": args.employee, "dry_run": not args.execute},
         )
+    if args.resource == "runtime":
+        return _request("GET", "/api/admin/runtime/reconciliation")
     if args.resource == "memory":
+        if args.action == "status": return _request("GET", "/api/admin/memory/status")
         if args.action == "list": return _request("GET", "/api/admin/memories", params={"status": args.status, "scope": args.scope})
         if args.action == "detail": return _request("GET", f"/api/admin/memories/{args.memory_id}")
         if args.action in {"approve", "reject", "supersede"}:
             body = {"notes": args.notes, "superseded_by": args.superseded_by}
             return _request("POST", f"/api/admin/memories/{args.memory_id}/{args.action}", body=body)
-        return _request("POST", "/api/admin/memory/reindex", params={"from_version": args.from_version, "to_version": args.to_version})
+        return _request(
+            "POST",
+            "/api/admin/memory/reindex",
+            params={"from_version": args.from_version, "to_version": args.to_version},
+            timeout=3600,
+        )
     return _request("POST", "/api/admin/checkpoints/prune", params={"older_than_days": args.older_than, "dry_run": str(not args.execute).lower()})
 
 

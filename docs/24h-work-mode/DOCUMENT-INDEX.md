@@ -133,6 +133,11 @@ OneManCompany-main/
 - **用途**：记录当前 SQLite 单机方案的正式决策、边界和 PostgreSQL 迁移触发条件
 - **适合**：架构评审、上线前 Gate 和未来迁移准备
 
+#### [reports/RUNTIME-STATE-RECONCILIATION-20260814.md](./reports/RUNTIME-STATE-RECONCILIATION-20260814.md)
+- **用途**：正式 RuntimeStorage checkpoint finding 与 Memory Outbox backlog 的只读对账
+- **内容**：7 条 legacy system automation orphan 分类、26 条 pending outbox 分类、数据不变证据和处置边界
+- **适合**：embedding/vector Gate 前的运行状态审计
+
 #### [RUNTIME-WARNING-REMEDIATION-PLAN.md](./RUNTIME-WARNING-REMEDIATION-PLAN.md)
 - **用途**：处理历史 ex-employee、缺失 skill hook、system automation 假告警和 adhoc TaskTree 路径问题
 - **内容**：红灯测试、受控 skill reconciliation、system project 隔离、备份/隔离/回滚和专项 Gate
@@ -550,6 +555,8 @@ OneManCompany-main/
 - `reports/SERVICE-VERIFY-20260814.md`：memory-enabled 隔离真实服务、readiness、在线备份与 clean shutdown。
 - `reports/RECOVERY-REPORT.md`：SQLite 独立备份恢复演练结果。
 - `reports/FORMAL-DATA-INTEGRITY-20260814.md`：正式数据隔离、live-service 并发活动和 `iter_009` 保护。
+- `reports/RUNTIME-STATE-RECONCILIATION-20260814.md`：正式 RuntimeStorage 只读对账、legacy system orphan 分类和 Memory Outbox 审计。
+- `reports/MEMORY-VECTOR-GATE-20260814.md`：sqlite-vec、混合检索、versioned shadow reindex、真实云阻塞和测试正式库隔离修复。
 - `STATUS-REPORT.md`：当前已完成项、隔离验证和正式上线阻塞项。
 
 ### Runtime warning remediation execution report

@@ -105,3 +105,22 @@ checkpoint_conflicts=7
 These values must be reconciled before formal 24-hour launch; they do not invalidate the completed employee/hook/system-context/tree-path repair.
 
 No Git commit or push was performed.
+
+## Post-remediation log audit and pytest HR isolation follow-up
+
+A later attachment was split at the remediation restart boundary. Before the restart it contained six false system-project warnings, 24 invalid archived-profile warnings, three missing TaskTree warnings, and two Talent Market SSE disconnects. After the remediation restart, the only HTTP anomaly was `GET /health` returning 404 while the supported `GET /api/health` returned 200; none of the target employee/hook/system-context/tree-path warnings recurred. Both SSE disconnects auto-reconnected.
+
+The audit also found that the invalid archived `00010` profile had reappeared under the formal `ex-employees` directory with the same SHA-256 as the previously quarantined source. A red-capable regression test proved that pytest redirected `EMPLOYEES_DIR` but not `EX_EMPLOYEES_DIR`. The unit fixture now redirects active and archived employee paths in `config`, `store`, and `memory_service`.
+
+Verification after the fix:
+
+```text
+termination + isolation regression = 12 passed
+full repository suite              = 4693 passed, 5 skipped, 73 warnings
+formal Runtime SQLite unchanged    = true
+active 00010 unchanged             = true
+archived 00010 unchanged           = true
+iter_009 unchanged                 = true
+```
+
+The reappeared formal archived record was not deleted or moved during this audit. It requires the existing verified-backup, dry-run, audited quarantine, and post-operation hash process. The future-dated `2026-08-15` lines in the supplied attachment are later than the current report date `2026-08-14`; they are treated as ordering evidence only, not as authoritative current-date or 24-hour wall-clock evidence.

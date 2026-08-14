@@ -248,7 +248,9 @@ class MemoryService:
                     status = "candidate"
                     previous["status"] = "disputed"
                     previous["disputed_at"] = iso_now()
-                    await self.storage.memory_store.aput(namespace, item.key, previous, index=self._index_arg())
+                    await self.storage.put_memory(
+                        namespace, item.key, previous, index=self._index_arg()
+                    )
                     break
         memory_id = str(uuid.uuid4())
         key = dedupe_key or f"{memory_id}:{_content_hash(memory_type, safe_subject, safe_text, safe_structured)[:16]}"
@@ -276,7 +278,7 @@ class MemoryService:
             "created_at": iso_now(),
             "verified_at": iso_now() if status in ACTIVE_STATUSES and status == "verified" else None,
         }
-        await self.storage.memory_store.aput(namespace, key, value, index=self._index_arg())
+        await self.storage.put_memory(namespace, key, value, index=self._index_arg())
         if conflicting is not None:
             old_key, previous = conflicting
             conflict_id = str(uuid.uuid4())
@@ -304,22 +306,42 @@ class MemoryService:
         max_chars = max(0, min(int(max_chars), MAX_INJECTED_CHARS))
         results: list[dict[str, Any]] = []
         for namespace in self._allowed_namespaces(employee_id, project_id):
-            try:
-                rows = await self.storage.memory_store.asearch(namespace, query=query or None, limit=limit * 2)
-            except Exception:
-                rows = await self.storage.memory_store.asearch(namespace, query=None, limit=limit * 2)
-            for row in rows:
-                value = dict(row.value or {})
-                status = str(value.get("status", "candidate"))
-                if not include_unverified and status not in ACTIVE_STATUSES:
-                    continue
-                expires = _parse_time(value.get("expires_at"))
-                if expires and expires <= _now():
-                    continue
-                value["key"] = row.key
-                value["namespace"] = list(row.namespace)
-                value["score"] = getattr(row, "score", None)
-                results.append(self._public_memory(value))
+            vector_query = query or None
+            if not getattr(self.storage, "memory_vector_enabled", False):
+                vector_query = None
+            # Apply trust status in SQL before vector limiting. Otherwise a large
+            # set of similar candidates could crowd verified/active memories out
+            # of the result window before policy filtering runs.
+            filters = [None] if include_unverified else [
+                {"status": status} for status in sorted(ACTIVE_STATUSES)
+            ]
+            for status_filter in filters:
+                try:
+                    rows = await self.storage.memory_store.asearch(
+                        namespace,
+                        query=vector_query,
+                        filter=status_filter,
+                        limit=limit * 2,
+                    )
+                except Exception:
+                    rows = await self.storage.memory_store.asearch(
+                        namespace,
+                        query=None,
+                        filter=status_filter,
+                        limit=limit * 2,
+                    )
+                for row in rows:
+                    value = dict(row.value or {})
+                    status = str(value.get("status", "candidate"))
+                    if not include_unverified and status not in ACTIVE_STATUSES:
+                        continue
+                    expires = _parse_time(value.get("expires_at"))
+                    if expires and expires <= _now():
+                        continue
+                    value["key"] = row.key
+                    value["namespace"] = list(row.namespace)
+                    value["score"] = getattr(row, "score", None)
+                    results.append(self._public_memory(value))
         # Deterministic structured fallback ranking: verified/source-backed facts
         # first, then semantic score, then recency.
         # Stable two-pass ordering keeps newest records first within the
@@ -368,7 +390,9 @@ class MemoryService:
                 old_namespace, old_key, old_value = await self._find_memory(str(conflict[1]))
                 old_value["status"] = "superseded"
                 old_value["superseded_at"] = iso_now()
-                await self.storage.memory_store.aput(old_namespace, old_key, old_value, index=self._index_arg())
+                await self.storage.put_memory(
+                    old_namespace, old_key, old_value, index=self._index_arg()
+                )
                 value["supersedes"] = old_value.get("memory_id")
                 await self.storage.execute(
                     "UPDATE memory_conflicts SET status='resolved',resolution_action='supersede_old',resolved_by=?,resolved_at=? WHERE conflict_id=?",
@@ -401,14 +425,14 @@ class MemoryService:
             value["superseded_at"] = iso_now()
             value["superseded_by"] = target_value.get("memory_id") or target_key
             target_value["supersedes"] = value.get("memory_id") or key
-            await self.storage.memory_store.aput(
+            await self.storage.put_memory(
                 target_namespace, target_key, target_value, index=self._index_arg()
             )
         else:
             raise ValueError("unsupported memory review decision")
         value = self._public_memory(value)
         safe_admin_id = redact_sensitive(admin_id)[:100]
-        await self.storage.memory_store.aput(namespace, key, value, index=self._index_arg())
+        await self.storage.put_memory(namespace, key, value, index=self._index_arg())
         await self.storage.execute(
             "INSERT INTO memory_reviews(review_id,namespace_json,memory_key,decision,decided_by,notes,decided_at) VALUES (?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), json.dumps(list(namespace)), key, decision, safe_admin_id, redact_sensitive(notes), iso_now()),

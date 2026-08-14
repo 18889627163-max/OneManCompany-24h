@@ -92,8 +92,8 @@
 | dispatch intent | 已有 durable 表和基础方法 | 完成 prepared 到 started 的 reconciler |
 | Memory Outbox/Review/Conflict 表 | 已有基础 schema | 实现 worker、ACL、状态机和管理接口 |
 | SQLite online backup | 已有基础实现和测试 | 加入保留策略、恢复演练和自动化 |
-| `sqlite-vec` 运行依赖 | 已在 `pyproject.toml`/`uv.lock` 显式锁定；隔离服务当前报告 unavailable | 完成真实 extension 加载、维度探针和向量检索演练 |
-| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL 和可信度状态已实现 | 完成真实 embedding/vector 和 reindex 演练 |
+| `sqlite-vec` 运行依赖 | ARM64 隔离环境已实际加载 `v0.1.9` 并完成向量写入/检索 | 完成受控真实云 embedding 的 endpoint/model/dimension Gate |
+| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL、混合检索和 versioned shadow reindex 已实现并隔离演练 | 完成真实云 embedding 和正式 worker 让位演练 |
 | 长期记忆检索工具 | `search_memory`、`propose_memory` 已实现并按 runtime identity 授权 | 完成真实项目成员和 prompt budget 演练 |
 | Memory worker | durable Memory Outbox worker 已接入 lifespan | 验证真实 embedding pending/backoff 和 Provider 让位 |
 | 管理 API/CLI/前端状态 | 管理 API 与 CLI 已实现；health 状态已接入 | 补齐并实测全部前端 attention/holding 展示 |
@@ -116,16 +116,22 @@
 - 隔离模拟 Provider 429 已通过：`os._exit(88)` 后 holding metadata 恢复，成功 callable 只执行一次；
 - P0 Gate 重跑结果为 `standard_v2_p0=passed`，Recovery Gate 为 `standard_v2_recovery=passed`，两者均保持 `formal_24h_launch_allowed=false`；
 - memory-enabled 隔离真实服务 health、在线备份、直接 integrity check 和 clean shutdown 已通过；
-- 最终全量测试达到 `4677 passed, 5 skipped, 73 warnings`；
+- sqlite-vec `v0.1.9` 已在隔离 Runtime SQLite 实际加载；v1→v2 shadow reindex、原子切换、失败保持旧 active、结构化降级和 outbox 不消费均通过；
+- embedding model、dimensions、text fields 和 Provider endpoint fingerprint 已纳入 index identity，同版本漂移 fail closed；
+- 测试误触正式 Runtime SQLite 的根因已修复：相对数据库路径跟随 `OMC_DATA_ROOT`、unit lifespan 使用 `tmp_path`、pytest 直接访问正式库 fail closed；
+- 测试员工目录隔离已补齐：`config/store/memory_service` 的 active 与 ex-employee 路径均重定向到每测试 `tmp_path`，解雇流程测试不再写入正式历史员工目录；
+- 最终全量测试达到 `4693 passed, 5 skipped, 73 warnings`；测试前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和 `iter_009` 的 SHA-256、大小与 mtime 均不变；
 - recovery tests 全部使用临时 `OMC_DATA_ROOT`；当前正式服务并发写入单独记为 live-service activity，不做危险回滚；
-- `iter_009` 哈希保持 `fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251`。
+- RuntimeStorage 只读对账已完成：7 条 finding 均为旧 `_sys_automation_*` adhoc thread 假 orphan，正式 actionable finding 为 0；Memory Outbox 当前 26 条均为 `pending/attempt=0`，未删除、未消费、未重放；
+- health/API/CLI 已区分 actionable checkpoint finding 与 legacy system orphan，future reconciler 同时排除新旧 system/adhoc thread；
+- `iter_009.yaml` 当前受保护文件哈希为 `4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626`，本次只读对账前后未变化。
 
 #### 2.3.2 尚未完成的上线阻塞项
 
 - 全新专用 standard v2 演练 iteration 上的真实后端停止/重启和同 thread resume；
 - dispatch、executor started、业务 side-effect 三个阶段的真实 receipt/ledger 故障注入；
 - 受控真实云 Provider HTTP 429、长 backoff、优先级竞争和恢复 UI；
-- 真实云 embedding、sqlite-vec、混合检索和 versioned reindex；
+- 真实云 embedding endpoint/model/dimension 探针、正式 worker pending/backoff 和 Provider 让位；
 - 独立恢复后的真实 TaskTree/checkpoint/receipt/acceptance 只读对账；
 - 24 小时墙钟、真机 smoke、FFmpeg/FFprobe 证据；
 - 全新 standard v2 iteration 的四人正式复验与显式验收。
@@ -547,7 +553,7 @@ procedural 工作方法、检查表、SOP 和恢复 runbook
 
 ```text
 OMC_MEMORY_ENABLED=true
-OMC_MEMORY_DATABASE_PATH=.onemancompany/data/memory-v1.sqlite3
+OMC_MEMORY_DATABASE_PATH=.onemancompany/data/runtime.sqlite3
 OMC_MEMORY_EMBEDDING_BASE_URL=...
 OMC_MEMORY_EMBEDDING_API_KEY=...
 OMC_MEMORY_EMBEDDING_MODEL=...
@@ -561,8 +567,8 @@ OMC_MEMORY_INDEX_VERSION=v1
 - API key 不写入 memory、checkpoint、audit 或错误正文；
 - 启动探针验证模型、维度和 sqlite-vec 可加载；
 - 维度与 active index 不一致时禁止向旧 index 写入；
-- reindex 创建新 `memory-vN.sqlite3`；
-- 后台重建完成且验证通过后原子切换 `active-memory-index.json`；
+- reindex 在同一 Runtime SQLite 的 `memory_vector_versions` 中创建目标版本 shadow vectors；
+- 后台重建完成且验证通过后，在单事务中归档旧向量、切换 `store_vectors` 和 active index contract；
 - 不在同一个向量空间混用模型或维度。
 
 ### 8.2 为什么不用独立 FAISS
@@ -1143,6 +1149,8 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 7. embedding 不可用时 pending + 结构化降级；
 8. 实现 versioned reindex 和原子切换。
 
+当前状态：1—8 的代码和隔离 Gate 已完成；真实云 endpoint/model/dimension 探针、正式 Memory worker backlog 补向量和 Provider 让位仍待受控演练。当前实现使用同一 Runtime SQLite 内的 `memory_vector_versions` shadow rows 原子切换，不创建独立 `memory-vN.sqlite3`。
+
 退出条件：关闭 embedding 服务后正式任务仍完成；恢复后 backlog 自动补齐且无重复 memory。
 
 ### Phase 6：组织配置和自动化落地
@@ -1341,7 +1349,9 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 9. side-effect invocation ledger 和 Provider durable retry 修复；
 10. checkpoint reconciler 启动接入及 TaskTree-first 状态矩阵；
 11. 隔离 subprocess crash/resume、副作用防重放和模拟 Provider 429 holding/resume；
-12. 全量测试 `4677 passed, 5 skipped`，P0 与 Recovery Gate 均通过。
+12. sqlite-vec `v0.1.9`、混合检索、versioned shadow reindex、失败结构化降级和 outbox 保持 pending 的隔离 Gate；
+13. 测试 Runtime SQLite 隔离修复与回归保护；
+14. 全量测试 `4693 passed, 5 skipped`，P0 与 Recovery Gate 均通过。
 
 ### 已完成 P1：运行告警与历史数据治理
 
@@ -1356,10 +1366,10 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 
 ### 下一组 P1：真实长期记忆与 Provider Gate
 
-1. 配置受控云 embedding，执行模型/维度探针；
-2. 启用 sqlite-vec，验证 namespace/status 先过滤、向量检索、去重重排和 prompt budget；
-3. 验证 embedding 故障结构化降级、pending 补向量和 memory worker Provider 让位；
-4. 完成 index version 切换与 reindex；
+1. 配置受控云 embedding，在全新临时 `OMC_DATA_ROOT` 执行 endpoint/model/dimension 探针；
+2. 使用真实云返回验证 namespace/status 先过滤、向量检索、去重重排和 prompt budget；
+3. 验证真实 embedding 故障下的 pending 补向量和 memory worker Provider 让位；
+4. 经审批后才允许在正式 Runtime SQLite 注册目标 index version；正式 26 条 outbox 不得直接消费；
 5. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、durable backoff、优先级和恢复 UI。
 
 ### 下一组 P1：真实服务恢复与独立对账

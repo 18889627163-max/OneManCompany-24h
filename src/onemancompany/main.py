@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -872,22 +873,24 @@ async def _prepare_memory_index(settings):
         "embed": embeddings,
         "text_fields": ["text"],
         "index_version": settings.omc_memory_index_version,
+        "embedding_model": settings.omc_memory_embedding_model,
+        "provider_fingerprint": hashlib.sha256(
+            settings.omc_memory_embedding_base_url.rstrip("/").encode("utf-8")
+        ).hexdigest(),
     }, "healthy", "healthy"
 
 
 @asynccontextmanager
 async def _runtime_lifespan(app: FastAPI):
     """Own SQLite, official LangGraph persistence and ProviderGateway lifecycle."""
-    from onemancompany.core.config import DATA_ROOT, settings
+    from onemancompany.core.config import resolve_runtime_database_path, settings
     from onemancompany.core.provider_gateway import (
         ProviderGateway,
         set_provider_gateway,
     )
     from onemancompany.core.runtime_storage import RuntimeStorage, set_runtime_storage
 
-    storage_path = Path(settings.omc_memory_database_path)
-    if not storage_path.is_absolute():
-        storage_path = Path.cwd() / storage_path
+    storage_path = resolve_runtime_database_path(settings.omc_memory_database_path)
     storage = RuntimeStorage(storage_path)
     gateway = None
     memory_worker = None
@@ -896,6 +899,8 @@ async def _runtime_lifespan(app: FastAPI):
     try:
         memory_index, embedding_status, vector_status = await _prepare_memory_index(settings)
         await storage.initialize(memory_index=memory_index)
+        if storage.memory_reindex_required:
+            vector_status = "reindex_required"
         app.state.memory_embedding_status = embedding_status
         app.state.memory_vector_status = vector_status
         set_runtime_storage(storage)

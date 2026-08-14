@@ -75,6 +75,10 @@ async def test_checkpoint_reconciler_enforces_tasktree_first_matrix_and_records_
         await _write_checkpoint(storage, finished_thread)
         await _write_checkpoint(storage, orphan_thread)
         await _write_checkpoint(storage, "omc:system:adhoc:probe:g1")
+        await _write_checkpoint(
+            storage,
+            "omc:_sys_automation_coo-blocking-check:unknown-iteration:legacy-node:g1",
+        )
 
         report = await reconcile_checkpoints(storage, projects)
         assert report.resumable == 1

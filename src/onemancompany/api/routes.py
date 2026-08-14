@@ -181,22 +181,25 @@ async def _runtime_health_payload(request: Request) -> dict:
     vector_status = str(
         getattr(request.app.state, "memory_vector_status", "disabled" if not memory_enabled else "unavailable")
     )
+    memory_index = {
+        "active_version": None,
+        "target_version": None,
+        "reindex_required": False,
+    }
+    if storage_healthy and memory_enabled:
+        memory_index = await storage.memory_index_status()
 
-    backlog = 0
-    oldest_memory_event_at = None
-    checkpoint_conflicts = 0
+    reconciliation = {
+        "memory_outbox_backlog": 0,
+        "oldest_memory_event_at": None,
+        "checkpoint_actionable": 0,
+        "checkpoint_findings_total": 0,
+        "checkpoint_legacy_system_orphans": 0,
+    }
     if storage_healthy:
-        row = await storage.fetchone(
-            "SELECT COUNT(*), MIN(created_at) FROM memory_outbox "
-            "WHERE status IN ('pending','processing','holding')"
-        )
-        if row:
-            backlog = int(row[0] or 0)
-            oldest_memory_event_at = row[1]
-        row = await storage.fetchone(
-            "SELECT COUNT(*) FROM recoveries WHERE status IN ('conflict','orphan','blocked')"
-        )
-        checkpoint_conflicts = int(row[0] or 0) if row else 0
+        from onemancompany.core.runtime_reconciliation import runtime_reconciliation_health
+
+        reconciliation = await runtime_reconciliation_health(storage)
 
     provider_healthy = bool(gateway and await gateway.health_check())
     provider_metrics = await gateway.metrics() if provider_healthy else {
@@ -213,15 +216,20 @@ async def _runtime_health_payload(request: Request) -> dict:
         ),
         "sqlite_vec": vector_status,
         "embedding": embedding_status,
+        "memory_index_active_version": memory_index["active_version"],
+        "memory_index_target_version": memory_index["target_version"],
+        "memory_reindex_required": bool(memory_index["reindex_required"]),
         "provider_gateway": "healthy" if provider_healthy else "degraded",
         "automation_registry": automation_status,
         "automation_registered": int(registration.get("total", 0)),
         "provider_running": int(provider_metrics["running"]),
         "provider_queued": int(provider_metrics["queued"]),
         "oldest_provider_request_at": provider_metrics["oldest_queue_at"],
-        "memory_worker_backlog": backlog,
-        "oldest_memory_event_at": oldest_memory_event_at,
-        "checkpoint_conflicts": checkpoint_conflicts,
+        "memory_worker_backlog": int(reconciliation["memory_outbox_backlog"]),
+        "oldest_memory_event_at": reconciliation["oldest_memory_event_at"],
+        "checkpoint_conflicts": int(reconciliation["checkpoint_actionable"]),
+        "checkpoint_findings_total": int(reconciliation["checkpoint_findings_total"]),
+        "checkpoint_legacy_system_orphans": int(reconciliation["checkpoint_legacy_system_orphans"]),
     }
 
 
@@ -237,6 +245,25 @@ async def admin_list_memories(request: Request, status: str = "", scope: str = "
     service = _memory_service_or_503(request)
     rows = await service.list_memories(status=status, scope=scope, limit=limit, offset=offset)
     return {"items": rows, "count": len(rows)}
+
+
+@router.get("/api/admin/memory/status")
+async def admin_memory_status(request: Request) -> dict:
+    """Return sanitized index and outbox state without memory payloads."""
+    from onemancompany.core.runtime_reconciliation import runtime_reconciliation_health
+
+    _require_runtime_admin(request)
+    _memory_service_or_503(request)
+    storage = request.app.state.runtime_storage
+    result = await storage.memory_index_status()
+    reconciliation = await runtime_reconciliation_health(storage)
+    result.update({
+        "embedding": str(getattr(request.app.state, "memory_embedding_status", "degraded")),
+        "sqlite_vec": str(getattr(request.app.state, "memory_vector_status", "unavailable")),
+        "memory_worker_backlog": int(reconciliation["memory_outbox_backlog"]),
+        "oldest_memory_event_at": reconciliation["oldest_memory_event_at"],
+    })
+    return result
 
 
 @router.get("/api/admin/memories/{memory_id}")
@@ -288,7 +315,19 @@ async def admin_supersede_memory(request: Request, memory_id: str, body: MemoryR
 @router.post("/api/admin/memory/reindex")
 async def admin_reindex_memory(request: Request, from_version: str = "", to_version: str = "") -> dict:
     _require_runtime_admin(request)
-    return {"status": "accepted", "from_version": from_version or None, "to_version": to_version or None, "mode": "outbox_job_contract", "message": "Vector reindex worker is not enabled in this runtime; no data was changed."}
+    _memory_service_or_503(request)
+    storage = request.app.state.runtime_storage
+    try:
+        result = await storage.reindex_memory_index(
+            from_version=from_version,
+            to_version=to_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    request.app.state.memory_vector_status = "healthy"
+    return result
 
 
 @router.post("/api/admin/skills/reconcile")
@@ -344,6 +383,18 @@ async def admin_quarantine_archived_employee(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api/admin/runtime/reconciliation")
+async def admin_runtime_reconciliation(request: Request) -> dict:
+    """Return sanitized read-only recovery/outbox classification."""
+    from onemancompany.core.runtime_reconciliation import runtime_reconciliation_summary
+
+    _require_runtime_admin(request)
+    storage = getattr(request.app.state, "runtime_storage", None)
+    if storage is None or not await storage.health_check():
+        raise HTTPException(status_code=503, detail="Runtime storage is unavailable")
+    return await runtime_reconciliation_summary(storage, include_items=True)
 
 
 @router.post("/api/admin/checkpoints/prune")

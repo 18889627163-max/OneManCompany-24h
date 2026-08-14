@@ -498,3 +498,23 @@ class TestDataRootOverrideContract:
         env_example = Path(".env.example").read_text(encoding="utf-8")
         assert 'os.environ.get("OMC_DATA_ROOT"' in source
         assert "OMC_DATA_ROOT=" in env_example
+
+    def test_default_runtime_database_resolves_inside_data_root(self, tmp_path, monkeypatch):
+        """The default database path must follow the process isolation boundary."""
+        import onemancompany.core.config as config_mod
+
+        monkeypatch.setattr(config_mod, "DATA_ROOT", tmp_path / "isolated-data")
+
+        resolved = config_mod.resolve_runtime_database_path(
+            ".onemancompany/data/runtime.sqlite3"
+        )
+
+        assert resolved == (tmp_path / "isolated-data" / "data" / "runtime.sqlite3").resolve()
+
+    def test_relative_runtime_database_cannot_escape_data_root(self, tmp_path, monkeypatch):
+        import onemancompany.core.config as config_mod
+
+        monkeypatch.setattr(config_mod, "DATA_ROOT", tmp_path / "isolated-data")
+
+        with pytest.raises(ValueError, match="escapes OMC_DATA_ROOT"):
+            config_mod.resolve_runtime_database_path("../formal-runtime.sqlite3")

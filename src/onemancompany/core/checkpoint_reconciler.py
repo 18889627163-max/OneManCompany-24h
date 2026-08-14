@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 
+from onemancompany.core.runtime_reconciliation import is_system_adhoc_checkpoint_thread
 from onemancompany.core.runtime_storage import RuntimeStorage
 from onemancompany.core.task_lifecycle import TaskPhase
 from onemancompany.core.task_tree import TaskTree, get_tree_lock, register_tree
@@ -191,7 +192,7 @@ async def reconcile_checkpoints(
     formal_checkpoint_threads = {
         thread_id
         for thread_id in checkpoint_threads
-        if thread_id.startswith("omc:") and not thread_id.startswith("omc:system:adhoc:")
+        if thread_id.startswith("omc:") and not is_system_adhoc_checkpoint_thread(thread_id)
     }
     for thread_id in sorted(formal_checkpoint_threads - set(indexed_threads)):
         parts = thread_id.split(":")
