@@ -1,0 +1,148 @@
+{
+  "generated_at": "2026-08-14T04:43:18.574141+00:00",
+  "manifest": "recovery_implementation_20260814",
+  "repository_vcs": "no .git directory; SHA-256 file manifest used",
+  "status": "complete",
+  "verification": {
+    "full_suite": "4662 passed, 5 skipped, 73 warnings in 137.13s",
+    "recovery_targeted": "4 passed in 2.08s",
+    "final_code_quality_and_recovery": "7 passed in 2.73s",
+    "p0_gate": "passed",
+    "recovery_gate": "passed",
+    "formal_24h_launch_allowed": false,
+    "iter_009_hash": "fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251"
+  },
+  "files": [
+    {
+      "path": "src/onemancompany/core/runtime_storage.py",
+      "bytes": 43606,
+      "sha256": "312d8042d23982ca96f66bd2f61b80318f6936873b65c0f72e8116ec71dfb54f"
+    },
+    {
+      "path": "src/onemancompany/core/provider_gateway.py",
+      "bytes": 11324,
+      "sha256": "ab82a4bd3f5f8adf7bae5a8a7daf1ec8c9b0b9864c34e1d4e588ccaef75e1a59"
+    },
+    {
+      "path": "src/onemancompany/core/tool_registry.py",
+      "bytes": 22787,
+      "sha256": "21573832a2c499cdc8811edd8679d992865360a556621a268cc1516dd5ed6a60"
+    },
+    {
+      "path": "src/onemancompany/core/checkpoint_reconciler.py",
+      "bytes": 8722,
+      "sha256": "537558463cc5bf8a8e49f094aa3c79cf61fd31d14aa15cc7d0e67760a4550fb8"
+    },
+    {
+      "path": "src/onemancompany/agents/tree_tools.py",
+      "bytes": 58908,
+      "sha256": "c774b2b273dc0efd5eca4f7fb9645376babac59f12095aab863156a6e2b1feef"
+    },
+    {
+      "path": "src/onemancompany/core/vessel.py",
+      "bytes": 228845,
+      "sha256": "8a815d1994039bbb97ef2b8b2835cfaba49893a3eed60090e93bf003b55c5169"
+    },
+    {
+      "path": "src/onemancompany/main.py",
+      "bytes": 42126,
+      "sha256": "e35f7c73a262ab8d4a6d4e303b91cf760c84376ea92b3a7e61d0921f40d27e50"
+    },
+    {
+      "path": "tests/unit/core/test_runtime_storage.py",
+      "bytes": 13646,
+      "sha256": "4e7c68737c53ce5da7bd6d7287def30679d0a2ebaae41cce54ea2dabab23f4f2"
+    },
+    {
+      "path": "tests/unit/core/test_provider_gateway.py",
+      "bytes": 5439,
+      "sha256": "26d0bfe2b1d765d029183534bfce94b7f4eef8d64e10a55e8f868073cee85d03"
+    },
+    {
+      "path": "tests/unit/core/test_tool_registry.py",
+      "bytes": 26053,
+      "sha256": "5ae23bdd6bda3b9466479652a59e33727230649995cff5cbc65f0d56cfb662ce"
+    },
+    {
+      "path": "tests/unit/core/test_checkpoint_reconciler.py",
+      "bytes": 4479,
+      "sha256": "ec967ef0aefa4247a24dacb08895c135542319b066466ccab1de391c68fc4806"
+    },
+    {
+      "path": "tests/integration/recovery_worker.py",
+      "bytes": 5750,
+      "sha256": "0ae2f4a5c7afee84e9ddb89cecf828e778ace9ef98ad3451beb7ca3262a2bcd4"
+    },
+    {
+      "path": "tests/integration/provider_recovery_worker.py",
+      "bytes": 2683,
+      "sha256": "040be7a70b45861484f3c93ea3b4d7d209a97bd1de9723a2f9eb943a2d15debe"
+    },
+    {
+      "path": "tests/integration/test_checkpoint_crash_resume.py",
+      "bytes": 1952,
+      "sha256": "13e1d8a5c973e4e5aa02291b355849c94e53355a5a3aa36073283127e2a5cf0d"
+    },
+    {
+      "path": "tests/integration/test_provider_holding_resume.py",
+      "bytes": 1639,
+      "sha256": "b405f24f408b4b1a7b73881c5b1114a02783444c3cebdd92659eef3ea74612e0"
+    },
+    {
+      "path": "tests/integration/test_checkpoint_reconciler.py",
+      "bytes": 2058,
+      "sha256": "dbfd7776ea088f09c887fe02a7380bc693cd00f256df92aa9cdf1c5e0ac6c034"
+    },
+    {
+      "path": "scripts/check-p0-gate.py",
+      "bytes": 10800,
+      "sha256": "7c8c6c23e0cad0072aca4240892dc81b68d8810328d910eb592e78a717928467"
+    },
+    {
+      "path": "docs/24h-work-mode/STATUS-REPORT.md",
+      "bytes": 11638,
+      "sha256": "ac5f705babe647113834c5df8531c968661a5d0e1bc532a4ab2b42956ffdaff3"
+    },
+    {
+      "path": "docs/24h-work-mode/IMPLEMENTATION-PLAN.md",
+      "bytes": 61489,
+      "sha256": "54922c834197f648fccdbf212a843c83d54980a1f783df1ad5ee65f0a28c9312"
+    },
+    {
+      "path": "docs/24h-work-mode/DOCUMENT-INDEX.md",
+      "bytes": 16694,
+      "sha256": "c66001428b5869b6836fb0708b9d48c1420582eae53610bb17031ba482896d0a"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/P0-GATE-REPORT.json",
+      "bytes": 7303,
+      "sha256": "44c758011b0a58ba2919120ef3203ced376e99a97e5a62ae7e150331cf969222"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/RECOVERY-GATE-REPORT.json",
+      "bytes": 3157,
+      "sha256": "116c1f4e460ec5e9a2756a098a39cdf87f5400045ec8f6093428200f2c67070d"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/CHECKPOINT-CRASH-RESUME-20260814.md",
+      "bytes": 2655,
+      "sha256": "88c0c69c08378d16fd5d4152fb8754be84a4067b5de3a8cf0a13384b9f21b405"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/PROVIDER-HOLDING-RESUME-20260814.md",
+      "bytes": 2162,
+      "sha256": "0fa34f60784a9ab59904f7d3ee07b4dc8ab7ba4b4995a4e3422f91c19f6b097f"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/CHECKPOINT-RECONCILIATION-20260814.md",
+      "bytes": 2401,
+      "sha256": "d22a52a35d4e4491995ecad015afac8dcbacc1d7674e0dd14d7fbab251ffe985"
+    },
+    {
+      "path": "docs/24h-work-mode/reports/FORMAL-DATA-INTEGRITY-20260814.md",
+      "bytes": 4953,
+      "sha256": "64e4499056938c0c19481ee1d1dc0e6ed69c6f6c149e0da5f21d2effa8966b71"
+    }
+  ],
+  "missing": []
+}

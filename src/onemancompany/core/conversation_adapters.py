@@ -1,0 +1,376 @@
+"""Conversation adapter protocol and registry.
+
+Each executor type (LangChain, Claude session, etc.) provides an adapter
+that knows how to send messages and manage lifecycle for conversations.
+Adapters are registered via the ``@register_adapter`` decorator and looked
+up by executor type string.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+
+from loguru import logger
+
+from onemancompany.core.conversation import Conversation, Message
+from onemancompany.core.models import ConversationType
+
+# Single-file constants
+EXECUTOR_TYPE_LANGCHAIN = "langchain"
+EXECUTOR_TYPE_CLAUDE_SESSION = "claude_session"
+EXECUTOR_TYPE_SUBPROCESS = "subprocess"
+
+# Roles excluded from EA chat tool access (EA should not perform HR operations)
+_EA_EXCLUDED_ROLES: frozenset[str] = frozenset({"HR"})
+
+
+@runtime_checkable
+class ConversationAdapter(Protocol):
+    async def send(
+        self, conversation: Conversation, messages: list[Message], new_message: Message,
+    ) -> str:
+        """Send message with full history, return agent reply text."""
+        ...
+
+    async def on_create(self, conversation: Conversation) -> None:
+        """Optional init when conversation starts."""
+        ...
+
+    async def on_close(self, conversation: Conversation) -> None:
+        """Optional adapter-level cleanup (release resources)."""
+        ...
+
+
+_adapter_registry: dict[str, type] = {}
+
+
+def register_adapter(executor_type: str):
+    """Decorator to register an adapter class for an executor type."""
+    def decorator(cls):
+        _adapter_registry[executor_type] = cls
+        logger.debug("[conversation] registered adapter: {}", executor_type)
+        return cls
+    return decorator
+
+
+def get_adapter(executor_type: str) -> type:
+    """Get adapter class by executor type. Raises KeyError if not found."""
+    if executor_type not in _adapter_registry:
+        raise KeyError(f"No conversation adapter for executor type: {executor_type}")
+    return _adapter_registry[executor_type]
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+
+def _get_employee_executor(employee_id: str):
+    """Get the Launcher for an employee. Lazy import to avoid circular deps."""
+    from onemancompany.core.vessel import employee_manager
+
+    executor = employee_manager.executors.get(employee_id)
+    if not executor:
+        raise ValueError(f"No executor for employee {employee_id}")
+    return executor
+
+
+_EXECUTOR_CLASS_MAP: dict[str, str] = {
+    "ClaudeSessionExecutor": EXECUTOR_TYPE_CLAUDE_SESSION,
+    "LangChainExecutor": EXECUTOR_TYPE_LANGCHAIN,
+    "EmployeeAgent": EXECUTOR_TYPE_LANGCHAIN,
+    "SubprocessExecutor": EXECUTOR_TYPE_SUBPROCESS,
+}
+
+
+def _get_executor_type(employee_id: str) -> str:
+    """Determine executor type string from Launcher subclass."""
+    executor = _get_employee_executor(employee_id)
+    cls_name = type(executor).__name__
+    executor_type = _EXECUTOR_CLASS_MAP.get(cls_name)
+    if executor_type is None:
+        logger.warning(
+            "[conversation] unknown executor class '{}' for employee {}, defaulting to langchain",
+            cls_name, employee_id,
+        )
+        executor_type = EXECUTOR_TYPE_LANGCHAIN
+    return executor_type
+
+
+def _build_conversation_prompt(
+    conversation: Conversation, messages: list[Message], new_message: Message,
+) -> str:
+    """Build a prompt with conversation history for the executor."""
+    from onemancompany.core.config import employee_configs, get_workspace_dir, settings
+
+    lines = []
+    lines.append("You are in a conversation with the CEO.")
+    cfg = employee_configs.get(conversation.employee_id)
+    provider = (cfg.api_provider if cfg and cfg.api_provider else settings.default_api_provider) or "unknown"
+    model = (cfg.llm_model if cfg and cfg.llm_model else settings.default_llm_model) or "unknown"
+    lines.append(f"Runtime LLM: provider={provider}, model={model}.")
+    lines.append(
+        "If the CEO asks what model/provider you are, answer from Runtime LLM above. "
+        "Do not infer or claim a different vendor from your role, tools, or framework."
+    )
+    if conversation.type == ConversationType.ONE_ON_ONE:
+        lines.append("This is a 1-on-1 meeting. Be direct and professional.")
+        workspace_dir = get_workspace_dir(conversation.employee_id).resolve()
+        lines.append(
+            f"Use this workspace for all files/artifacts in this meeting: {workspace_dir}"
+        )
+        lines.append(
+            "Never create files in repository-root ./workspace; always use your employee workspace path above."
+        )
+        shared_prompt = _load_oneonone_workspace_shared_prompt()
+        if shared_prompt:
+            lines.append("\n--- Workspace Policy (Shared Prompt) ---")
+            lines.append(shared_prompt)
+    elif conversation.type == ConversationType.CEO_INBOX:
+        lines.append("The CEO is responding to your request. Answer their questions.")
+    elif (
+        conversation.type == ConversationType.PRODUCT
+        or conversation.type == ConversationType.PRODUCT.value
+    ):
+        lines.append(_build_product_planning_prompt(conversation))
+    elif conversation.type == ConversationType.EA_CHAT:
+        lines.append(
+            "This is a direct chat with the CEO. You are their EA (Executive Assistant).\n"
+            "- Answer questions directly and concisely.\n"
+            "- For BRAND NEW tasks requiring team execution (build something, research, hiring), "
+            "call create_project(task=<full CEO request>). Do this without asking.\n"
+            "- Do NOT create a project for:\n"
+            "  * Follow-up messages continuing the same conversation topic (check history!)\n"
+            "  * Simple questions, status checks, advice requests\n"
+            "  * Feedback or adjustments CEO gives about ongoing work\n"
+            "- If the conversation history shows this topic was already discussed, respond "
+            "directly — do NOT create a new project.\n"
+            "- When genuinely unsure (CEO mentions an existing project but adds a big new "
+            "requirement), ask: 'Should I create a new project or add to the existing one?'"
+        )
+
+    if messages:
+        lines.append("\n--- Conversation History ---")
+        for msg in messages:
+            lines.append(f"[{msg.role}]: {msg.text}")
+
+    lines.append(f"\n[{new_message.role}]: {new_message.text}")
+    if new_message.attachments:
+        from onemancompany.core.attachments import build_attachment_prompt_from_paths
+        lines.append(build_attachment_prompt_from_paths(list(new_message.attachments)))
+    lines.append("\nPlease respond:")
+    return "\n".join(lines)
+
+
+def _build_product_planning_prompt(conversation: Conversation) -> str:
+    """Build planning instructions + current product context for PRODUCT conversations."""
+    from onemancompany.core import product as prod
+    from onemancompany.core.models import IssueStatus
+
+    slug = (conversation.metadata or {}).get("product_slug", "")
+    product = prod.load_product(slug) if slug else None
+    if not product:
+        return (
+            "This is a product planning conversation, but the product could not be loaded. "
+            f"Slug: {slug!r}. Ask the CEO to clarify."
+        )
+
+    parts = [
+        "This is a product planning conversation with the CEO. You are the EA (Executive Assistant).",
+        "Your job:",
+        "  1. Clarify the product's objective and success metrics through targeted questions.",
+        "  2. Use add_product_key_result(product_slug, title, target, unit) to record measurable KRs.",
+        "  3. Use create_product_issue(product_slug, title, description, priority) to record concrete work items.",
+        "  4. Keep questions concise and one at a time. Confirm before creating each KR/issue.",
+        "",
+        f"## Current product: {product['name']}  (slug: {slug})",
+    ]
+    if product.get("description"):
+        parts.append(f"Description: {product['description']}")
+
+    krs = product.get("key_results", []) or []
+    if krs:
+        parts.append("\n### Existing Key Results")
+        for kr in krs:
+            target = kr.get("target", 0)
+            current = kr.get("current", 0)
+            parts.append(f"- {kr.get('title','')}: {current}/{target} {kr.get('unit','')}".rstrip())
+    else:
+        parts.append("\n### Existing Key Results: (none yet — propose some after clarifying with CEO)")
+
+    issues = prod.list_issues(slug) or []
+    terminal = {IssueStatus.DONE.value, IssueStatus.RELEASED.value}
+    open_issues = [i for i in issues if i.get("status") not in terminal]
+    if open_issues:
+        parts.append(f"\n### Open Issues ({len(open_issues)})")
+        for issue in open_issues[:10]:
+            parts.append(f"- [{issue.get('priority','?')}] {issue.get('title','')} ({issue.get('id','')})")
+    else:
+        parts.append("\n### Open Issues: (none yet)")
+
+    return "\n".join(parts)
+
+
+def _load_oneonone_workspace_shared_prompt() -> str:
+    """Load workspace policy prompt for one-on-one from shared_prompts."""
+    from onemancompany.core.config import SHARED_PROMPTS_DIR, SOURCE_ROOT, read_text_utf
+
+    candidates = [
+        SHARED_PROMPTS_DIR / "oneonone_workspace_policy.md",
+        SOURCE_ROOT / "company" / "shared_prompts" / "oneonone_workspace_policy.md",
+    ]
+    for path in candidates:
+        try:
+            if path.exists():
+                return read_text_utf(path).strip()
+        except OSError:
+            logger.warning("[conversation] failed to read workspace policy prompt: {}", path)
+    return ""
+
+
+def _resolve_conversation_work_dir(conversation: Conversation) -> str:
+    """Resolve work_dir for an interactive conversation."""
+    from onemancompany.core.config import get_workspace_dir
+
+    # 1-on-1 should always use employee private workspace.
+    if conversation.type == ConversationType.ONE_ON_ONE:
+        ws = get_workspace_dir(conversation.employee_id).resolve()
+        ws.mkdir(parents=True, exist_ok=True)
+        return str(ws)
+
+    # CEO inbox can inherit project_dir if provided, else fallback to employee workspace.
+    project_dir = (conversation.metadata or {}).get("project_dir", "")
+    if project_dir:
+        p = Path(project_dir).resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p)
+
+    ws = get_workspace_dir(conversation.employee_id).resolve()
+    ws.mkdir(parents=True, exist_ok=True)
+    return str(ws)
+
+
+# ---------------------------------------------------------------------------
+# Concrete adapters
+# ---------------------------------------------------------------------------
+
+
+class _BaseConversationAdapter:
+    """Shared send logic — all executor types use the same prompt + execute flow."""
+
+    def _prepare_prompt(self, prompt: str, conversation: Conversation) -> str:
+        """Hook for subclasses to transform the prompt before execution."""
+        return prompt
+
+    async def send(
+        self, conversation: Conversation, messages: list[Message], new_message: Message,
+    ) -> str:
+        from onemancompany.core.runtime_context import _interaction_type, _interaction_work_dir
+
+        # EA chat: use a one-shot agent with full tools (except HR role tools)
+        if conversation.type == ConversationType.EA_CHAT:
+            return await self._send_ea_chat(conversation, messages, new_message)
+
+        executor = _get_employee_executor(conversation.employee_id)
+        prompt = _build_conversation_prompt(conversation, messages, new_message)
+        prompt = self._prepare_prompt(prompt, conversation)
+        work_dir = _resolve_conversation_work_dir(conversation)
+        logger.debug(
+            "[conversation] {}.send: employee={}, project_id={}, work_dir={}",
+            type(self).__name__, conversation.employee_id,
+            conversation.metadata.get("project_id"),
+            work_dir,
+        )
+        from onemancompany.core.vessel import TaskContext
+
+        ctx = TaskContext(
+            employee_id=conversation.employee_id,
+            project_id=conversation.metadata.get("project_id", ""),
+            work_dir=work_dir,
+        )
+        tok_type = _interaction_type.set(conversation.type)
+        tok_work = _interaction_work_dir.set(work_dir)
+        try:
+            result = await executor.execute(prompt, ctx)
+            return result.output
+        finally:
+            _interaction_type.reset(tok_type)
+            _interaction_work_dir.reset(tok_work)
+
+    async def _send_ea_chat(
+        self, conversation: Conversation, messages: list[Message], new_message: Message,
+    ) -> str:
+        """EA chat: build a one-shot agent with full tools (except HR role tools)."""
+        from onemancompany.core.runtime_context import _interaction_type, _interaction_work_dir
+        from onemancompany.core.tool_registry import tool_registry
+        from onemancompany.agents.base import (
+            create_runtime_react_agent,
+            extract_final_content,
+            make_llm,
+        )
+        from langchain_core.messages import HumanMessage
+
+        logger.debug(
+            "[conversation] _send_ea_chat: employee={}, tool_count={}",
+            conversation.employee_id,
+            len(tool_registry.all_tool_names()),
+        )
+
+        prompt = _build_conversation_prompt(conversation, messages, new_message)
+        work_dir = _resolve_conversation_work_dir(conversation)
+
+        # Get proxied tools with employee_id injection (strips employee_id from LLM schema)
+        tools = tool_registry.get_proxied_tools_for(conversation.employee_id)
+
+        # Build a LangGraph react agent with full tools.
+        llm = make_llm(conversation.employee_id)
+        agent = create_runtime_react_agent(model=llm, tools=tools)
+
+        tok_type = _interaction_type.set(conversation.type)
+        tok_work = _interaction_work_dir.set(work_dir)
+        try:
+            from onemancompany.core.runtime_context import langgraph_invoke_config
+            result = await agent.ainvoke(
+                {"messages": [HumanMessage(content=prompt)]},
+                config=langgraph_invoke_config(),
+            )
+            return extract_final_content(result)
+        finally:
+            _interaction_type.reset(tok_type)
+            _interaction_work_dir.reset(tok_work)
+
+    async def on_create(self, conversation: Conversation) -> None:
+        pass
+
+    async def on_close(self, conversation: Conversation) -> None:
+        pass
+
+
+@register_adapter(EXECUTOR_TYPE_LANGCHAIN)
+class LangChainAdapter(_BaseConversationAdapter):
+    pass
+
+
+@register_adapter(EXECUTOR_TYPE_CLAUDE_SESSION)
+class ClaudeSessionAdapter(_BaseConversationAdapter):
+    pass
+
+
+@register_adapter(EXECUTOR_TYPE_SUBPROCESS)
+class SubprocessAdapter(_BaseConversationAdapter):
+    """Adapter for SubprocessExecutor-based employees (e.g. OpenClaw).
+
+    Injects company context (identity, culture, SOPs, guidance, work principles)
+    into the conversation prompt — matching what vessel._execute_task does for
+    scheduled tasks. LangChain gets this via system prompt; Claude CLI via
+    CLAUDE.md/MCP; subprocess employees need it prepended to the prompt.
+    """
+
+    def _prepare_prompt(self, prompt: str, conversation: Conversation) -> str:
+        from onemancompany.core.vessel import employee_manager
+
+        company_ctx = employee_manager._build_company_context_block(conversation.employee_id)
+        if company_ctx:
+            return f"{company_ctx}\n\n{prompt}"
+        return prompt

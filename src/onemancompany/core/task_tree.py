@@ -1,0 +1,721 @@
+"""Task tree — unified hierarchical task model.
+
+Each project has one TaskTree persisted as task_tree.yaml.
+EA is the root node; children are dispatched subtasks.
+Results propagate upward through accept_child/reject_child.
+
+Tree Registry
+-------------
+Trees are cached in memory. All code should use ``get_tree(path)``
+instead of ``TaskTree.load(path)`` directly, and ``save_tree_async(path)``
+instead of ``tree.save(path)``.  This ensures a single in-memory object
+per tree file — no stale-read overwrites.
+"""
+from __future__ import annotations
+
+import asyncio
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from loguru import logger
+
+from onemancompany.core.config import ENCODING_UTF8, NODES_DIR_NAME
+from onemancompany.core.task_lifecycle import (
+    TaskPhase, transition,
+    RESOLVED, DONE_EXECUTING, UNBLOCKS_DEPENDENTS, WILL_NOT_DELIVER,
+)
+
+# ---------------------------------------------------------------------------
+# Single-file constants
+# ---------------------------------------------------------------------------
+NODES_DIR = NODES_DIR_NAME
+_STATUS_MIGRATION = {
+    "complete": "completed",
+    "in_progress": "processing",
+}
+
+
+@dataclass
+class TaskNode:
+    """Single node in the task tree."""
+
+    id: str = ""
+    parent_id: str = ""
+    children_ids: list[str] = field(default_factory=list)
+
+    employee_id: str = ""
+    title: str = ""                   # short task name shown in tree view
+    description: str = ""
+    acceptance_criteria: list[str] = field(default_factory=list)
+    node_type: str = "task"  # See NodeType enum in task_lifecycle.py
+
+    model_used: str = ""              # which LLM executed
+    project_dir: str = ""             # OneManCompany iteration workspace path
+    implementation_path: str = ""     # authoritative external business repository path
+
+    status: str = TaskPhase.PENDING.value  # pending → processing → completed → accepted / failed / cancelled
+    result: str = ""
+    acceptance_result: dict | None = None  # {passed: bool, notes: str}
+
+    project_id: str = ""
+    product_id: str = ""              # linked product (empty = no product)
+    created_at: str = ""
+    completed_at: str = ""
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    timeout_seconds: int = 3600
+
+    branch: int = 0
+    branch_active: bool = True
+
+    depends_on: list[str] = field(default_factory=list)
+
+    # Directive chain: preserves the original description while allowing each upstream
+    # node (EA, COO) to add binding instructions. The executor sees both the original
+    # description AND all directives from the chain.
+    # Format: [{"from": employee_id, "role": "COO", "directive": "...", "at": iso_timestamp}]
+    directives: list[dict] = field(default_factory=list)
+
+    # Hold reason: when a tool needs the parent to enter HOLDING after execution,
+    # it sets this field (e.g. "blocking_child=<node_id>"). vessel.py checks this
+    # generically — no child-type-specific detection needed.
+    hold_reason: str = ""
+
+    # Timestamp when the node entered HOLDING state (ISO format).
+    # Used by the global HOLDING timeout to auto-fail stale tasks.
+    hold_started_at: str = ""
+
+    # How many times this node has been rejected and retried by the parent.
+    # Used to cap infinite retry loops (e.g. EA keeps retrying a failing child).
+    retry_count: int = 0
+
+    # How many times this node was retried due to stall detection
+    # (agent promised action but didn't call tools). Capped at MAX_STALL_RETRIES.
+    stall_retry_count: int = 0
+
+    # Child failure event ids already surfaced to this parent. This makes
+    # failure notifications edge-triggered instead of repeatedly firing while a
+    # failed child remains in the tree.
+    handled_child_failure_ids: list[str] = field(default_factory=list)
+
+    # Stable key for system-generated notification nodes so callers can dedupe
+    # retries/recovery without relying on prompt text.
+    event_key: str = ""
+
+    # Durable receipt written by dispatch_child().  A child appearing in the
+    # YAML tree is not, by itself, evidence that the task was formally
+    # dispatched: older code and model-driven shell commands can create tree
+    # nodes without scheduling them.  This field is populated only after the
+    # dispatch persistence/index/schedule checks pass.
+    dispatch_verification: dict = field(default_factory=dict)
+
+    # Workflow contract v2 durable execution metadata. These fields remain
+    # harmless for legacy/v1 trees, while allowing strict workflows to resume
+    # without reconstructing execution facts from logs.
+    task_key: str = ""
+    dispatch_request_fingerprint: str = ""
+    execution_generation: int = 1
+    checkpoint_thread_id: str = ""
+    checkpoint_status: str = ""
+    last_checkpoint_at: str = ""
+    next_retry_at: str = ""
+    # Business recovery summary. This intentionally stores only durable phase
+    # facts, not the full LangGraph message history.
+    execution_checkpoint: dict = field(default_factory=dict)
+    acceptance_audit: dict | None = None
+    review_omission_count: int = 0
+    review_omission_processed: bool = False
+
+    # --- Content externalization tracking (not part of equality/repr) ---
+    _content_dirty: bool = field(default=False, init=False, repr=False, compare=False)
+    _content_loaded: bool = field(default=False, init=False, repr=False, compare=False)
+    _description_preview: str = field(default="", init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = uuid.uuid4().hex[:12]
+        if not self.created_at:
+            self.created_at = datetime.now().isoformat()
+        if self.description:
+            self._description_preview = self.description[:200]
+
+    def __setattr__(self, name: str, value) -> None:
+        super().__setattr__(name, value)
+        if name == "description":
+            super().__setattr__("_content_dirty", True)
+            super().__setattr__("_description_preview", (value or "")[:200])
+        elif name in ("result", "directives"):
+            super().__setattr__("_content_dirty", True)
+
+    @property
+    def description_preview(self) -> str:
+        return self._description_preview
+
+    def save_content(self, project_dir: Path | str) -> None:
+        """Write description/result to a separate content file (atomic)."""
+        if not self._content_dirty:
+            return
+        import os
+        import tempfile
+
+        nodes_dir = Path(project_dir) / NODES_DIR
+        nodes_dir.mkdir(parents=True, exist_ok=True)
+        content: dict = {"description": self.description, "result": self.result}
+        if self.directives:
+            content["directives"] = self.directives
+        target = nodes_dir / f"{self.id}.yaml"
+        text = yaml.dump(content, allow_unicode=True, sort_keys=False)
+        fd, tmp_path = tempfile.mkstemp(dir=nodes_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding=ENCODING_UTF8) as f:
+                f.write(text)
+            os.replace(tmp_path, target)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError as _cleanup_err:
+                logger.debug("Failed to clean up temp file: {}", _cleanup_err)
+            raise
+        self._content_dirty = False
+
+    def load_content(self, project_dir: Path | str) -> None:
+        """Load description/result from content file (idempotent)."""
+        if self._content_loaded:
+            return
+        content_path = Path(project_dir) / NODES_DIR / f"{self.id}.yaml"
+        if content_path.exists():
+            data = yaml.safe_load(content_path.read_text(encoding=ENCODING_UTF8)) or {}
+            # Use object.__setattr__ to avoid marking dirty
+            desc = data.get("description", "")
+            object.__setattr__(self, "description", desc)
+            object.__setattr__(self, "result", data.get("result", ""))
+            object.__setattr__(self, "_description_preview", (desc or "")[:200])
+            if "directives" in data:
+                object.__setattr__(self, "directives", data["directives"])
+        self._content_loaded = True
+
+    def set_status(self, target: TaskPhase) -> None:
+        """Validated status transition. Raises TaskTransitionError if invalid."""
+        current = TaskPhase(self.status)
+        transition(self.id, current, target)
+        self.status = target.value
+
+    @property
+    def is_resolved(self) -> bool:
+        return TaskPhase(self.status) in RESOLVED
+
+    @property
+    def is_done_executing(self) -> bool:
+        return TaskPhase(self.status) in DONE_EXECUTING
+
+    @property
+    def unblocks_dependents(self) -> bool:
+        return TaskPhase(self.status) in UNBLOCKS_DEPENDENTS
+
+    @property
+    def is_ceo_node(self) -> bool:
+        from onemancompany.core.task_lifecycle import NodeType
+        return self.node_type in (NodeType.CEO_PROMPT, NodeType.CEO_FOLLOWUP, NodeType.CEO_REQUEST)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "parent_id": self.parent_id,
+            "children_ids": list(self.children_ids),
+            "employee_id": self.employee_id,
+            "title": self.title,
+            "description_preview": self._description_preview,
+            "acceptance_criteria": list(self.acceptance_criteria),
+            "node_type": self.node_type.value if hasattr(self.node_type, 'value') else str(self.node_type),
+            "model_used": self.model_used,
+            "project_dir": self.project_dir,
+            "implementation_path": self.implementation_path,
+            "status": self.status,
+            "acceptance_result": self.acceptance_result,
+            "project_id": self.project_id,
+            "product_id": self.product_id,
+            "created_at": self.created_at,
+            "completed_at": self.completed_at,
+            "cost_usd": self.cost_usd,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "timeout_seconds": self.timeout_seconds,
+            "branch": self.branch,
+            "branch_active": self.branch_active,
+            "depends_on": list(self.depends_on),
+            "hold_reason": self.hold_reason,
+            "hold_started_at": self.hold_started_at,
+            "retry_count": self.retry_count,
+            "stall_retry_count": self.stall_retry_count,
+            "handled_child_failure_ids": list(self.handled_child_failure_ids),
+            "event_key": self.event_key,
+            "dispatch_verification": dict(self.dispatch_verification),
+            "task_key": self.task_key,
+            "dispatch_request_fingerprint": self.dispatch_request_fingerprint,
+            "execution_generation": self.execution_generation,
+            "checkpoint_thread_id": self.checkpoint_thread_id,
+            "checkpoint_status": self.checkpoint_status,
+            "last_checkpoint_at": self.last_checkpoint_at,
+            "next_retry_at": self.next_retry_at,
+            "execution_checkpoint": dict(self.execution_checkpoint),
+            "acceptance_audit": self.acceptance_audit,
+            "review_omission_count": self.review_omission_count,
+            "review_omission_processed": self.review_omission_processed,
+            "directives_count": len(self.directives),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> TaskNode:
+        # Extract content fields before filtering to dataclass fields
+        has_description = "description" in d
+        has_result = "result" in d
+        old_format = has_description or has_result
+        desc_value = d.get("description", "")
+        result_value = d.get("result", "")
+        preview_value = d.get("description_preview", "")
+
+        _skip = {"description_preview"}
+        filtered = {k: v for k, v in d.items() if k in cls.__dataclass_fields__ and k not in _skip}
+        if "status" in filtered:
+            filtered["status"] = _STATUS_MIGRATION.get(filtered["status"], filtered["status"])
+        if not isinstance(filtered.get("dispatch_verification"), dict):
+            filtered["dispatch_verification"] = {}
+        # Migrate "NodeType.XXX" → "xxx" (old bug serialized enum repr instead of value)
+        if "node_type" in filtered:
+            nt = filtered["node_type"]
+            if isinstance(nt, str) and nt.startswith("NodeType."):
+                filtered["node_type"] = nt.split(".", 1)[1].lower()
+
+        if old_format:
+            # Old format: description/result inline — set them on the node
+            filtered["description"] = desc_value
+            filtered["result"] = result_value
+            node = cls(**filtered)
+            node._content_dirty = True
+            node._content_loaded = True
+        else:
+            # New format: skeleton only, content loaded lazily
+            node = cls(**filtered)
+            node._content_dirty = False
+            object.__setattr__(node, "_description_preview", preview_value)
+        return node
+
+
+class TaskTree:
+    """In-memory task tree with YAML persistence."""
+
+    def __init__(
+        self,
+        project_id: str,
+        mode: Literal["simple", "standard"] = "standard",
+        workflow_contract_version: int | None = None,
+    ) -> None:
+        self.project_id = project_id
+        self.mode = mode
+        # New standard workflows use v2. Historical files explicitly load as
+        # v1 when this field is absent, so merely reading them never migrates.
+        self.workflow_contract_version = (
+            int(workflow_contract_version)
+            if workflow_contract_version is not None
+            else (2 if mode == "standard" else 1)
+        )
+        self.dispatch_manifest: dict[str, dict] = {}
+        self.root_id: str = ""
+        self._nodes: dict[str, TaskNode] = {}
+        self.current_branch: int = 0
+
+    def create_root(self, employee_id: str, description: str) -> TaskNode:
+        node = TaskNode(
+            employee_id=employee_id,
+            description=description,
+            project_id=self.project_id,
+        )
+        self.root_id = node.id
+        self._nodes[node.id] = node
+        return node
+
+    def add_child(
+        self,
+        parent_id: str,
+        employee_id: str,
+        description: str,
+        acceptance_criteria: list[str],
+        timeout_seconds: int = 3600,
+        depends_on: list[str] | None = None,
+        title: str = "",
+    ) -> TaskNode:
+        parent = self._nodes[parent_id]
+        resolved_deps = depends_on or []
+
+        # Validate: all depends_on IDs must exist in the tree
+        for dep_id in resolved_deps:
+            if dep_id not in self._nodes:
+                raise ValueError(
+                    f"Dependency '{dep_id}' not found in tree. "
+                    f"All depends_on IDs must reference existing nodes."
+                )
+
+        # Validate: no circular dependency in the dep graph
+        if resolved_deps and self._has_cycle(resolved_deps):
+            raise ValueError(
+                f"Circular dependency detected: depends_on={resolved_deps} "
+                f"would create a cycle in the dependency graph."
+            )
+
+        child = TaskNode(
+            parent_id=parent_id,
+            employee_id=employee_id,
+            title=title,
+            description=description,
+            acceptance_criteria=acceptance_criteria,
+            project_id=self.project_id,
+            timeout_seconds=timeout_seconds,
+            depends_on=resolved_deps,
+            implementation_path=parent.implementation_path,
+        )
+        parent.children_ids.append(child.id)
+        self._nodes[child.id] = child
+        return child
+
+    def _has_cycle(self, new_deps: list[str]) -> bool:
+        """Check if adding a node with *new_deps* would create a cycle.
+
+        Since the new node doesn't exist in the graph yet, a cycle can only
+        form if the depends_on targets have transitive dependency paths that
+        loop among themselves.  We do a DFS from each dep target, following
+        existing depends_on edges, and check if we revisit any node in
+        *new_deps* via a different path (which would mean the new node sits
+        in a cycle: new→A→...→B→...→new where A,B ∈ new_deps).
+
+        In practice, because deps are set at creation and never mutated,
+        the existing graph is always a DAG. This guard catches programmatic
+        errors or future mutations.
+        """
+        dep_set = set(new_deps)
+        for start in new_deps:
+            visited: set[str] = set()
+            stack = [start]
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                node = self._nodes.get(current)
+                if not node:
+                    continue
+                for upstream in node.depends_on:
+                    if upstream in dep_set and upstream != start:
+                        # Another dep target is reachable — if the new node
+                        # depends on both, it's not a cycle (diamond pattern).
+                        # A true cycle would require upstream == start via a
+                        # different dep, but since the new node isn't in the
+                        # graph yet, that can't happen.
+                        pass
+                    if upstream == start and current != start:
+                        # Found a path back to start through existing edges
+                        # This shouldn't happen in a DAG but guards against
+                        # corrupted state
+                        logger.warning(
+                            "Cycle detected in existing dep graph: {} -> ... -> {}",
+                            start, current,
+                        )
+                        return True
+                    stack.append(upstream)
+        return False
+
+    def all_nodes(self) -> list[TaskNode]:
+        """Return all nodes in the tree."""
+        return list(self._nodes.values())
+
+    def get_node(self, node_id: str) -> TaskNode | None:
+        return self._nodes.get(node_id)
+
+    def get_children(self, node_id: str) -> list[TaskNode]:
+        node = self._nodes.get(node_id)
+        if not node:
+            return []
+        return [self._nodes[cid] for cid in node.children_ids if cid in self._nodes]
+
+    def get_siblings(self, node_id: str) -> list[TaskNode]:
+        node = self._nodes.get(node_id)
+        if not node or not node.parent_id:
+            return []
+        parent = self._nodes.get(node.parent_id)
+        if not parent:
+            return []
+        return [
+            self._nodes[cid]
+            for cid in parent.children_ids
+            if cid != node_id and cid in self._nodes
+        ]
+
+    def get_ea_node(self):
+        """Get the EA node (first task-type child of the CEO root node)."""
+        from onemancompany.core.task_lifecycle import NodeType
+        root = self._nodes.get(self.root_id)
+        if not root or root.node_type != NodeType.CEO_PROMPT:
+            # Legacy tree — root is EA
+            return root
+        for cid in root.children_ids:
+            child = self._nodes.get(cid)
+            if child and child.node_type == NodeType.TASK:
+                return child
+        return None
+
+    def new_branch(self) -> int:
+        """Start a new branch: deactivate non-root nodes, increment counter."""
+        self.current_branch += 1
+        for node in self._nodes.values():
+            if node.id != self.root_id:
+                node.branch_active = False
+        # Root always stays active
+        root = self._nodes.get(self.root_id)
+        if root:
+            root.branch = self.current_branch
+            root.branch_active = True
+        return self.current_branch
+
+    def get_active_children(self, node_id: str) -> list[TaskNode]:
+        """Get only branch_active children of a node."""
+        return [c for c in self.get_children(node_id) if c.branch_active]
+
+    def all_children_done(self, node_id: str) -> bool:
+        """All substantive active children have finished executing.
+
+        System node types (REVIEW, CEO_REQUEST, WATCHDOG_NUDGE, ADHOC, SYSTEM)
+        are excluded — they must not block parent completion.
+        """
+        from onemancompany.core.task_lifecycle import SYSTEM_NODE_TYPES
+        children = [
+            c for c in self.get_active_children(node_id)
+            if c.node_type not in SYSTEM_NODE_TYPES
+        ]
+        if not children:
+            return True
+        return all(c.is_done_executing for c in children)
+
+
+    def has_failed_children(self, node_id: str) -> bool:
+        return any(c.status == TaskPhase.FAILED for c in self.get_active_children(node_id))
+
+    def find_dependents(self, node_id: str) -> list[TaskNode]:
+        """Find all nodes that depend on the given node."""
+        return [n for n in self._nodes.values() if node_id in n.depends_on]
+
+    def all_deps_resolved(self, node_id: str) -> bool:
+        """All depends_on nodes are resolved (RESOLVED set)."""
+        node = self._nodes.get(node_id)
+        if not node or not node.depends_on:
+            return True
+        for dep_id in node.depends_on:
+            dep = self._nodes.get(dep_id)
+            if not dep or not dep.is_resolved:
+                return False
+        return True
+
+
+    def is_subtree_resolved(self, node_id: str) -> bool:
+        """Check if node AND all descendants are in RESOLVED state.
+
+        Bottom-up semantic: a subtree is resolved when the node itself
+        is resolved and every child subtree is also resolved.
+        """
+        node = self._nodes.get(node_id)
+        if not node:
+            return False
+        if not node.is_resolved:
+            return False
+        return all(
+            self.is_subtree_resolved(cid)
+            for cid in node.children_ids
+            if cid in self._nodes
+        )
+
+    def is_project_complete(self) -> bool:
+        """Check if the project is fully complete — ready for retrospective.
+
+        Condition: EA anchor has finished executing (DONE_EXECUTING) and
+        every child subtree of the EA anchor is fully resolved (RESOLVED).
+        The EA anchor itself may still be COMPLETED (not yet ACCEPTED)
+        because acceptance happens as part of the project completion flow.
+        """
+        ea = self.get_ea_node()
+        if not ea:
+            return False
+        if not ea.is_done_executing:
+            return False
+        # All children subtrees must be fully resolved
+        return all(
+            self.is_subtree_resolved(cid)
+            for cid in ea.children_ids
+            if cid in self._nodes
+        )
+
+    def has_failed_deps(self, node_id: str) -> bool:
+        """Check if any depends_on node will not deliver (failed/blocked/cancelled)."""
+        node = self._nodes.get(node_id)
+        if not node:
+            return False
+        for dep_id in node.depends_on:
+            dep = self._nodes.get(dep_id)
+            if dep and TaskPhase(dep.status) in WILL_NOT_DELIVER:
+                return True
+        return False
+
+    def save(self, path: Path) -> None:
+        """Save tree to disk atomically (temp file + rename).
+
+        Content files are saved first, then the skeleton YAML is written
+        to a temp file and atomically renamed. This ensures a crash mid-write
+        never leaves a corrupt tree YAML on disk.
+        """
+        import os
+        import tempfile
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Snapshot nodes to avoid "dictionary changed size during iteration"
+        # when async save runs concurrently with add_child modifications
+        nodes_snapshot = list(self._nodes.values())
+        # Externalize dirty node content before writing skeleton
+        for node in nodes_snapshot:
+            node.save_content(path.parent)
+        data = {
+            "project_id": self.project_id,
+            "root_id": self.root_id,
+            "current_branch": self.current_branch,
+            "mode": self.mode,
+            "workflow_contract_version": self.workflow_contract_version,
+            "dispatch_manifest": dict(self.dispatch_manifest),
+            "nodes": [n.to_dict() for n in nodes_snapshot],
+        }
+        content = yaml.dump(data, allow_unicode=True, sort_keys=False)
+        # Atomic write: write to temp file in same dir, then rename
+        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding=ENCODING_UTF8) as f:
+                f.write(content)
+            os.replace(tmp_path, path)  # atomic on same filesystem
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError as _cleanup_err:
+                logger.debug("Failed to clean up temp file: {}", _cleanup_err)
+            raise
+
+    @classmethod
+    def load(cls, path: Path, project_id: str = "", *, skeleton_only: bool = True) -> TaskTree:
+        data = yaml.safe_load(path.read_text(encoding=ENCODING_UTF8))
+        mode = data.get("mode", "standard")
+        tree = cls(
+            project_id=project_id or data.get("project_id", ""),
+            mode=mode,
+            workflow_contract_version=int(data.get("workflow_contract_version", 1)),
+        )
+        tree.root_id = data.get("root_id", "")
+        tree.current_branch = data.get("current_branch", 0)
+        tree.mode = mode
+        manifest = data.get("dispatch_manifest", {})
+        tree.dispatch_manifest = manifest if isinstance(manifest, dict) else {}
+        tree._source_dir = path.parent
+        for nd in data.get("nodes", []):
+            node = TaskNode.from_dict(nd)
+            tree._nodes[node.id] = node
+        # task_id_map removed — ignored for backward compat with old tree files
+        if not skeleton_only:
+            tree.load_all_content()
+        return tree
+
+    def load_all_content(self, project_dir: Path | None = None) -> None:
+        """Load content for all nodes from their content files."""
+        pdir = project_dir or getattr(self, "_source_dir", None)
+        if not pdir:
+            return
+        for node in self._nodes.values():
+            node.load_content(pdir)
+
+
+# ---------------------------------------------------------------------------
+# Tree Registry — in-memory cache + async persistence
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, TaskTree] = {}
+_locks: dict[str, threading.RLock] = {}
+_locks_guard = threading.Lock()  # protects _locks dict itself
+
+
+def _key(path: str | Path) -> str:
+    return str(Path(path).resolve())
+
+
+def get_tree(path: str | Path, project_id: str = "") -> TaskTree:
+    """Get tree from memory cache, loading from disk if not cached."""
+    key = _key(path)
+    if key not in _cache:
+        _cache[key] = TaskTree.load(Path(path), project_id=project_id)
+    return _cache[key]
+
+
+def register_tree(path: str | Path, tree: TaskTree) -> None:
+    """Register a newly created tree in the cache."""
+    _cache[_key(path)] = tree
+
+
+def get_tree_lock(path: str | Path) -> threading.RLock:
+    """Get per-tree RLock for protecting read-modify-write sequences.
+
+    Uses threading.RLock (not asyncio.Lock) so it works in both sync
+    (LangChain tool threads) and async contexts.  RLock is reentrant,
+    so nested calls (e.g. dispatch_child → _save_tree) won't deadlock.
+    """
+    key = _key(path)
+    with _locks_guard:
+        if key not in _locks:
+            _locks[key] = threading.RLock()
+        return _locks[key]
+
+
+def save_tree_async(path: str | Path) -> None:
+    """Schedule async disk save of the cached tree.
+
+    Safe to call from both sync and async contexts.
+    If no event loop is running, saves synchronously.
+    Acquires the tree lock to prevent concurrent mutation during save.
+    """
+    key = _key(path)
+    tree = _cache.get(key)
+    if not tree:
+        return
+    _path = Path(path)
+    try:
+        asyncio.get_running_loop()
+        from onemancompany.core.async_utils import spawn_background
+        spawn_background(_do_save(tree, _path))
+    except RuntimeError:
+        lock = get_tree_lock(path)
+        with lock:
+            tree.save(_path)
+
+
+def evict_tree(path: str | Path) -> None:
+    """Remove a tree from the cache (e.g. after project archive)."""
+    key = _key(path)
+    _cache.pop(key, None)
+    with _locks_guard:
+        _locks.pop(key, None)
+
+
+async def _do_save(tree: TaskTree, path: Path) -> None:
+    lock = get_tree_lock(path)
+    try:
+        lock.acquire()
+        tree.save(path)
+    except Exception as e:
+        logger.error("Failed to save tree {}: {}", path, e)
+    finally:
+        lock.release()

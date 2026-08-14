@@ -1,0 +1,711 @@
+"""Unit tests for core/tool_registry.py — ToolRegistry and ToolMeta."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import yaml
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_mock_tool(name: str) -> MagicMock:
+    """Create a mock LangChain BaseTool with the given name."""
+    tool = MagicMock()
+    tool.name = name
+    return tool
+
+
+def _make_employee(
+    emp_id: str,
+    role: str = "Engineer",
+    tool_permissions: list[str] | None = None,
+) -> MagicMock:
+    """Create a mock Employee object."""
+    emp = MagicMock()
+    emp.id = emp_id
+    emp.role = role
+    emp.tool_permissions = tool_permissions or []
+    return emp
+
+
+# ---------------------------------------------------------------------------
+# ToolMeta dataclass
+# ---------------------------------------------------------------------------
+
+class TestToolMeta:
+    def test_defaults(self):
+        from onemancompany.core.tool_registry import ToolMeta
+
+        meta = ToolMeta(name="foo", category="base")
+        assert meta.name == "foo"
+        assert meta.category == "base"
+        assert meta.allowed_roles is None
+        assert meta.allowed_users is None
+        assert meta.source == "internal"
+
+    def test_custom_fields(self):
+        from onemancompany.core.tool_registry import ToolMeta
+
+        meta = ToolMeta(
+            name="bar",
+            category="role",
+            allowed_roles=["Engineer", "Designer"],
+            allowed_users=["00007"],
+            source="asset",
+        )
+        assert meta.allowed_roles == ["Engineer", "Designer"]
+        assert meta.allowed_users == ["00007"]
+        assert meta.source == "asset"
+
+
+# ---------------------------------------------------------------------------
+# ToolRegistry — registration and lookup
+# ---------------------------------------------------------------------------
+
+class TestToolRegistryBasics:
+    def test_register_and_get_tool(self):
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        reg = ToolRegistry()
+        tool = _make_mock_tool("my_tool")
+        meta = ToolMeta(name="my_tool", category="base")
+        reg.register(tool, meta)
+
+        assert reg.get_tool("my_tool") is tool
+        assert reg.get_meta("my_tool") is meta
+
+    def test_get_tool_missing_returns_none(self):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        reg = ToolRegistry()
+        assert reg.get_tool("nonexistent") is None
+
+    def test_get_meta_missing_returns_none(self):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        reg = ToolRegistry()
+        assert reg.get_meta("nonexistent") is None
+
+    def test_all_tool_names(self):
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        reg = ToolRegistry()
+        for name in ["alpha", "beta", "gamma"]:
+            reg.register(_make_mock_tool(name), ToolMeta(name=name, category="base"))
+
+        names = reg.all_tool_names()
+        assert set(names) == {"alpha", "beta", "gamma"}
+
+    def test_all_tool_names_empty(self):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        reg = ToolRegistry()
+        assert reg.all_tool_names() == []
+
+    def test_register_overwrites_existing(self):
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        reg = ToolRegistry()
+        tool_v1 = _make_mock_tool("t")
+        tool_v2 = _make_mock_tool("t")
+        reg.register(tool_v1, ToolMeta(name="t", category="base"))
+        reg.register(tool_v2, ToolMeta(name="t", category="gated"))
+
+        assert reg.get_tool("t") is tool_v2
+        assert reg.get_meta("t").category == "gated"
+
+
+# ---------------------------------------------------------------------------
+# ToolRegistry — get_tools_for (permission filtering)
+# ---------------------------------------------------------------------------
+
+class TestGetToolsFor:
+    def _build_registry(self):
+        """Build a registry with one tool in each category."""
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        reg = ToolRegistry()
+
+        # base — always included
+        reg.register(
+            _make_mock_tool("list_colleagues"),
+            ToolMeta(name="list_colleagues", category="base"),
+        )
+
+        # gated — only if tool name in employee's tool_permissions
+        reg.register(
+            _make_mock_tool("bash"),
+            ToolMeta(name="bash", category="gated"),
+        )
+
+        # role — only if employee role matches
+        reg.register(
+            _make_mock_tool("deploy"),
+            ToolMeta(name="deploy", category="role", allowed_roles=["Engineer"]),
+        )
+
+        # asset — unrestricted (allowed_users is None)
+        reg.register(
+            _make_mock_tool("gmail"),
+            ToolMeta(name="gmail", category="asset", source="asset"),
+        )
+
+        # asset — talent-brought, restricted to specific users
+        reg.register(
+            _make_mock_tool("roblox"),
+            ToolMeta(name="roblox", category="asset", allowed_users=["00007"], source="talent"),
+        )
+
+        return reg
+
+    @patch("onemancompany.core.state.company_state")
+    def test_base_tools_always_included(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Marketing", tool_permissions=[])
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "list_colleagues" in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_gated_tools_always_included(self, mock_state):
+        """Gated category now treated same as base — always included."""
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Designer", tool_permissions=[])
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        # bash is registered as "gated" in _build_registry but now always allowed
+        assert "bash" in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_role_tools_matching_role(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Engineer")
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "deploy" in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_role_tools_non_matching_role(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Designer")
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "deploy" not in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_asset_tools_unrestricted(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Marketing")
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "gmail" in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_asset_tools_restricted_allowed(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00007", role="Engineer")
+        mock_state.employees = {"00007": emp}
+
+        tools = reg.get_tools_for("00007")
+        tool_names = [t.name for t in tools]
+        assert "roblox" in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_asset_tools_restricted_denied(self, mock_state):
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Engineer")
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "roblox" not in tool_names
+
+    @patch("onemancompany.core.state.company_state")
+    def test_unknown_employee_returns_empty(self, mock_state):
+        reg = self._build_registry()
+        mock_state.employees = {}
+
+        tools = reg.get_tools_for("99999")
+        assert tools == []
+
+    @patch("onemancompany.core.state.company_state")
+    def test_full_access_engineer(self, mock_state):
+        """An engineer with bash permission should get base + gated + role + unrestricted asset tools."""
+        reg = self._build_registry()
+        emp = _make_employee("00010", role="Engineer", tool_permissions=["bash"])
+        mock_state.employees = {"00010": emp}
+
+        tools = reg.get_tools_for("00010")
+        tool_names = [t.name for t in tools]
+        assert "list_colleagues" in tool_names
+        assert "bash" in tool_names
+        assert "deploy" in tool_names
+        assert "gmail" in tool_names
+        assert "roblox" not in tool_names  # restricted to 00007
+
+
+# ---------------------------------------------------------------------------
+# ToolRegistry — load_asset_tools
+# ---------------------------------------------------------------------------
+
+class TestLoadAssetTools:
+    def _make_tool_dir(self, base_dir: Path, name: str, tool_yaml: dict, py_code: str) -> Path:
+        """Create a tool folder with tool.yaml and {name}.py."""
+        tool_dir = base_dir / name
+        tool_dir.mkdir(parents=True, exist_ok=True)
+        with open(tool_dir / "tool.yaml", "w") as f:
+            yaml.dump(tool_yaml, f)
+        (tool_dir / f"{name}.py").write_text(py_code, encoding="utf-8")
+        return tool_dir
+
+    def test_load_asset_tools_discovers_modules(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+
+        py_code = """
+from langchain_core.tools import tool
+
+@tool
+def my_asset_tool(query: str) -> str:
+    \"\"\"A test asset tool.\"\"\"
+    return "result"
+"""
+        self._make_tool_dir(
+            tools_dir, "my_asset",
+            {"id": "my_asset", "name": "My Asset", "type": "langchain_module"},
+            py_code,
+        )
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)
+
+        assert "my_asset_tool" in reg.all_tool_names()
+        meta = reg.get_meta("my_asset_tool")
+        assert meta.category == "asset"
+        assert meta.source == "asset"
+
+    def test_load_asset_tools_with_allowed_users(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+
+        py_code = """
+from langchain_core.tools import tool
+
+@tool
+def restricted_tool(x: str) -> str:
+    \"\"\"Restricted tool.\"\"\"
+    return x
+"""
+        self._make_tool_dir(
+            tools_dir, "restricted",
+            {"id": "restricted", "name": "Restricted", "type": "langchain_module", "allowed_users": ["00007"]},
+            py_code,
+        )
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)
+
+        meta = reg.get_meta("restricted_tool")
+        assert meta is not None
+        assert meta.allowed_users == ["00007"]
+
+    def test_load_asset_tools_skips_non_langchain_module(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+
+        tool_dir = tools_dir / "template_tool"
+        tool_dir.mkdir()
+        with open(tool_dir / "tool.yaml", "w") as f:
+            yaml.dump({"id": "template_tool", "name": "Template", "type": "template"}, f)
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)
+
+        assert "template_tool" not in reg.all_tool_names()
+
+    def test_load_asset_tools_nonexistent_dir(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "nonexistent"
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)  # should not raise
+
+        assert reg.all_tool_names() == []
+
+    def test_load_asset_tools_handles_import_error(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+
+        self._make_tool_dir(
+            tools_dir, "broken",
+            {"id": "broken", "name": "Broken", "type": "langchain_module"},
+            "def bad syntax here!!!",
+        )
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)  # should log warning, not raise
+
+        assert "broken" not in reg.all_tool_names()
+
+    def test_load_asset_tools_collects_multiple_tools(self, tmp_path):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+
+        py_code = """
+from langchain_core.tools import tool
+
+@tool
+def tool_alpha(x: str) -> str:
+    \"\"\"Alpha.\"\"\"
+    return x
+
+@tool
+def tool_beta(x: str) -> str:
+    \"\"\"Beta.\"\"\"
+    return x
+"""
+        self._make_tool_dir(
+            tools_dir, "multi",
+            {"id": "multi", "name": "Multi", "type": "langchain_module"},
+            py_code,
+        )
+
+        reg = ToolRegistry()
+        reg.load_asset_tools(tools_dir)
+
+        names = reg.all_tool_names()
+        assert "tool_alpha" in names
+        assert "tool_beta" in names
+
+
+# ---------------------------------------------------------------------------
+# ToolRegistry — get_all_tools_except_roles
+# ---------------------------------------------------------------------------
+
+class TestGetAllToolsExceptRoles:
+    def _build_registry_with_roles(self):
+        """Build a registry with tools across different roles."""
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        reg = ToolRegistry()
+
+        reg.register(
+            _make_mock_tool("list_colleagues"),
+            ToolMeta(name="list_colleagues", category="base"),
+        )
+        reg.register(
+            _make_mock_tool("bash"),
+            ToolMeta(name="bash", category="gated"),
+        )
+        reg.register(
+            _make_mock_tool("hire_employee"),
+            ToolMeta(name="hire_employee", category="role", allowed_roles=["HR"]),
+        )
+        reg.register(
+            _make_mock_tool("deploy"),
+            ToolMeta(name="deploy", category="role", allowed_roles=["Engineer"]),
+        )
+        reg.register(
+            _make_mock_tool("gmail"),
+            ToolMeta(name="gmail", category="asset", source="asset"),
+        )
+        return reg
+
+    def test_exclude_hr_returns_all_non_hr_tools(self):
+        reg = self._build_registry_with_roles()
+        tools = reg.get_all_tools_except_roles(exclude_roles=frozenset({"HR"}))
+        tool_names = [t.name for t in tools]
+
+        assert "list_colleagues" in tool_names
+        assert "bash" in tool_names
+        assert "deploy" in tool_names
+        assert "gmail" in tool_names
+        assert "hire_employee" not in tool_names
+
+    def test_no_exclusion_returns_everything(self):
+        reg = self._build_registry_with_roles()
+        tools = reg.get_all_tools_except_roles(exclude_roles=None)
+        tool_names = [t.name for t in tools]
+
+        assert len(tool_names) == 5
+        assert "hire_employee" in tool_names
+        assert "deploy" in tool_names
+
+    def test_empty_registry_returns_empty(self):
+        from onemancompany.core.tool_registry import ToolRegistry
+
+        reg = ToolRegistry()
+        tools = reg.get_all_tools_except_roles(exclude_roles=frozenset({"HR"}))
+        assert tools == []
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# execute_tool — employee_id auto-fill
+# ---------------------------------------------------------------------------
+
+class TestExecuteToolEmployeeIdAutoFill:
+    """execute_tool should inject employee_id when the tool arg is empty."""
+
+    @pytest.mark.asyncio
+    async def test_auto_fills_empty_employee_id(self):
+        from onemancompany.core.tool_registry import execute_tool, tool_registry
+
+        mock_tool = MagicMock()
+        mock_tool.name = "fake_cron"
+        mock_tool.ainvoke = AsyncMock(return_value={"status": "ok"})
+
+        with patch.object(tool_registry, "get_tool", return_value=mock_tool):
+            with patch("onemancompany.core.vessel._current_vessel"):
+                await execute_tool("00004", "fake_cron", {"employee_id": "", "cron_name": "test"})
+
+        # employee_id should have been filled by execute_tool
+        assert mock_tool.ainvoke.call_args[0][0]["employee_id"] == "00004"
+
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_explicit_employee_id(self):
+        from onemancompany.core.tool_registry import execute_tool, tool_registry
+
+        mock_tool = MagicMock()
+        mock_tool.name = "fake_tool"
+        mock_tool.ainvoke = AsyncMock(return_value={"status": "ok"})
+
+        with patch.object(tool_registry, "get_tool", return_value=mock_tool):
+            with patch("onemancompany.core.vessel._current_vessel"):
+                await execute_tool("00004", "fake_tool", {"employee_id": "00010", "name": "x"})
+
+        # Should NOT overwrite the explicit 00010
+        assert mock_tool.ainvoke.call_args[0][0]["employee_id"] == "00010"
+
+    @pytest.mark.asyncio
+    async def test_injects_when_key_missing_from_args(self):
+        """MCP defense: employee_id injected even when key absent from args."""
+        from onemancompany.core.tool_registry import execute_tool, tool_registry
+
+        mock_tool = MagicMock()
+        mock_tool.name = "fake_tool"
+        mock_tool.ainvoke = AsyncMock(return_value={"status": "ok"})
+
+        with patch.object(tool_registry, "get_tool", return_value=mock_tool):
+            with patch("onemancompany.core.vessel._current_vessel"):
+                await execute_tool("00004", "fake_tool", {"name": "x"})
+
+        assert mock_tool.ainvoke.call_args[0][0]["employee_id"] == "00004"
+
+
+# ---------------------------------------------------------------------------
+# Proxied tools — employee_id injection + schema stripping
+# ---------------------------------------------------------------------------
+
+class TestProxiedToolsEmployeeId:
+    """Proxied tools inject employee_id at system level, hidden from LLM."""
+
+    def test_schema_strips_employee_id(self):
+        from onemancompany.core.tool_registry import ToolRegistry, ToolMeta
+        from langchain_core.tools import tool as lc_tool
+
+        @lc_tool
+        def my_tool(name: str, employee_id: str = "") -> dict:
+            """A test tool."""
+            return {}
+
+        reg = ToolRegistry()
+        reg.register(my_tool, ToolMeta(name="my_tool", category="base"))
+
+        with patch("onemancompany.core.store.load_employee", return_value={"role": "EA"}):
+            proxied = reg.get_proxied_tools_for("00004")
+
+        field_names = list(proxied[0].args_schema.model_fields.keys())
+        assert "employee_id" not in field_names
+        assert "name" in field_names
+
+    @pytest.mark.asyncio
+    async def test_proxy_injects_employee_id(self):
+        from onemancompany.core.tool_registry import ToolRegistry, ToolMeta, tool_registry
+        from langchain_core.tools import tool as lc_tool
+
+        captured = {}
+
+        @lc_tool
+        async def my_tool(name: str, employee_id: str = "") -> dict:
+            """A test tool."""
+            captured["employee_id"] = employee_id
+            return {"status": "ok"}
+
+        reg = ToolRegistry()
+        reg.register(my_tool, ToolMeta(name="my_tool", category="base"))
+
+        with patch("onemancompany.core.store.load_employee", return_value={"role": "EA"}):
+            proxied = reg.get_proxied_tools_for("00004")
+
+        # Simulate LLM calling the tool WITHOUT employee_id
+        with patch("onemancompany.core.tool_registry.tool_registry", reg):
+            with patch("onemancompany.core.vessel._current_vessel"):
+                await proxied[0].ainvoke({"name": "test"})
+
+        assert captured["employee_id"] == "00004"
+
+
+    def test_empty_tool_schema_is_explicit_openai_object(self):
+        """Zero-argument tools must not emit a provider-ambiguous schema."""
+        from langchain_core.tools import tool as lc_tool
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+        from onemancompany.core.tool_registry import ToolMeta, ToolRegistry
+
+        @lc_tool
+        def no_args() -> dict:
+            """A zero-argument tool."""
+            return {}
+
+        reg = ToolRegistry()
+        reg.register(no_args, ToolMeta(name="no_args", category="base"))
+        with patch("onemancompany.core.store.load_employee", return_value={"role": "EA"}):
+            proxied = reg.get_proxied_tools_for("00004")
+
+        payload = convert_to_openai_tool(proxied[0])
+        parameters = payload["function"]["parameters"]
+        assert parameters == {"type": "object", "properties": {}, "required": []}
+
+    def test_schema_keeps_required_target_employee_id(self):
+        """target_employee_id is REQUIRED (target) — must NOT be stripped."""
+        from onemancompany.core.tool_registry import ToolRegistry, ToolMeta
+        from langchain_core.tools import tool as lc_tool
+
+        @lc_tool
+        def dispatch_child(target_employee_id: str, description: str) -> dict:
+            """Dispatch a child task to an employee."""
+            return {}
+
+        reg = ToolRegistry()
+        reg.register(dispatch_child, ToolMeta(name="dispatch_child", category="base"))
+
+        with patch("onemancompany.core.store.load_employee", return_value={"role": "EA"}):
+            proxied = reg.get_proxied_tools_for("00004")
+
+        field_names = list(proxied[0].args_schema.model_fields.keys())
+        assert "target_employee_id" in field_names, "Required target_employee_id must stay in schema"
+
+    @pytest.mark.asyncio
+    async def test_proxy_does_not_overwrite_target_employee_id(self):
+        """Bug regression: proxy must NOT overwrite target_employee_id with caller's ID.
+
+        dispatch_child(target_employee_id="00002") called by EA (00004) must pass
+        target_employee_id="00002" to the tool, not "00004".
+        """
+        from onemancompany.core.tool_registry import ToolRegistry, ToolMeta
+        from langchain_core.tools import tool as lc_tool
+
+        captured = {}
+
+        @lc_tool
+        async def dispatch_child(target_employee_id: str, description: str) -> dict:
+            """Dispatch a child task to an employee."""
+            captured["target_employee_id"] = target_employee_id
+            return {"status": "ok"}
+
+        reg = ToolRegistry()
+        reg.register(dispatch_child, ToolMeta(name="dispatch_child", category="base"))
+
+        with patch("onemancompany.core.store.load_employee", return_value={"role": "EA"}):
+            proxied = reg.get_proxied_tools_for("00004")
+
+        # LLM calls with target_employee_id="00002"
+        with patch("onemancompany.core.tool_registry.tool_registry", reg):
+            with patch("onemancompany.core.vessel._current_vessel"):
+                await proxied[0].ainvoke({"target_employee_id": "00002", "description": "task"})
+
+        assert captured["target_employee_id"] == "00002", (
+            f"target_employee_id should be '00002', got '{captured['target_employee_id']}'"
+        )
+
+
+class TestModuleSingleton:
+    def test_singleton_exists(self):
+        from onemancompany.core.tool_registry import tool_registry
+
+        assert tool_registry is not None
+
+    def test_singleton_is_tool_registry(self):
+        from onemancompany.core.tool_registry import ToolRegistry, tool_registry
+
+        assert isinstance(tool_registry, ToolRegistry)
+
+@pytest.mark.asyncio
+async def test_formal_side_effect_tool_uses_durable_ledger_for_completed_replay(tmp_path):
+    from onemancompany.core.runtime_context import (
+        reset_task_runtime_context,
+        set_task_runtime_context,
+    )
+    from onemancompany.core.runtime_storage import RuntimeStorage, set_runtime_storage
+    from onemancompany.core.tool_registry import ToolMeta, execute_tool, tool_registry
+
+    calls = 0
+
+    async def durable_probe(task_key: str, value: str, employee_id: str = ""):
+        nonlocal calls
+        calls += 1
+        return {"status": "success", "value": value, "calls": calls}
+
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize()
+    set_runtime_storage(storage)
+    token = set_task_runtime_context({
+        "node_id": "formal-node",
+        "execution_generation": 1,
+        "checkpoint_thread_id": "omc:project:iter_001:formal-node:g1",
+    })
+    tool_registry.register(
+        durable_probe,
+        ToolMeta(name="durable_probe", category="base", side_effecting=True),
+    )
+    try:
+        with patch("onemancompany.core.skill_hooks.run_hooks", new=AsyncMock(return_value=[])):
+            first = await execute_tool(
+                "00006", "durable_probe", {"task_key": "probe-1", "value": "same"}
+            )
+            replay = await execute_tool(
+                "00006", "durable_probe", {"task_key": "probe-1", "value": "same"}
+            )
+            conflict = await execute_tool(
+                "00006", "durable_probe", {"task_key": "probe-1", "value": "changed"}
+            )
+        assert first == {"status": "success", "value": "same", "calls": 1}
+        assert replay == first
+        assert calls == 1
+        assert conflict["status"] == "holding"
+        assert "different arguments" in conflict["message"]
+    finally:
+        tool_registry._tools.pop("durable_probe", None)
+        tool_registry._meta.pop("durable_probe", None)
+        reset_task_runtime_context(token)
+        set_runtime_storage(None)
+        await storage.close()

@@ -1,0 +1,188 @@
+"""Unit tests for core/vessel_config.py — VesselConfig loading & saving."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from onemancompany.core.vessel_config import (
+    CapabilitiesConfig,
+    ContextConfig,
+    HooksConfig,
+    LimitsConfig,
+    PromptSection,
+    RunnerConfig,
+    VesselConfig,
+    _load_default_vessel_config,
+    load_vessel_config,
+    save_vessel_config,
+)
+
+
+# ---------------------------------------------------------------------------
+# VesselConfig dataclass defaults
+# ---------------------------------------------------------------------------
+
+class TestVesselConfigDefaults:
+    def test_default_runner(self):
+        cfg = VesselConfig()
+        assert cfg.runner.module == ""
+        assert cfg.runner.class_name == ""
+
+    def test_default_hooks(self):
+        cfg = VesselConfig()
+        assert cfg.hooks.module == ""
+        assert cfg.hooks.pre_task == ""
+        assert cfg.hooks.post_task == ""
+
+    def test_default_limits(self):
+        cfg = VesselConfig()
+        assert cfg.limits.max_retries == 3
+        assert cfg.limits.retry_delays == [5, 15, 30]
+        assert cfg.limits.max_subtask_iterations == 3
+        assert cfg.limits.max_subtask_depth == 2
+        assert cfg.limits.task_timeout_seconds == 600
+
+    def test_default_capabilities(self):
+        cfg = VesselConfig()
+        assert cfg.capabilities.sandbox is False
+        assert cfg.capabilities.file_upload is False
+        assert cfg.capabilities.websocket is False
+        assert not hasattr(cfg.capabilities, "image_generation")
+
+    def test_default_context(self):
+        cfg = VesselConfig()
+        assert cfg.context.prompt_sections == []
+        assert cfg.context.inject_progress_log is True
+        assert cfg.context.inject_task_history is True
+
+
+# ---------------------------------------------------------------------------
+# load_vessel_config
+# ---------------------------------------------------------------------------
+
+class TestLoadVesselConfig:
+    def test_nonexistent_dir_returns_default(self, tmp_path):
+        cfg = load_vessel_config(tmp_path / "nonexistent")
+        assert cfg.limits.max_retries == 3
+        assert cfg.capabilities.sandbox is False
+
+    def test_load_from_vessel_yaml(self, tmp_path):
+        vessel_dir = tmp_path / "vessel"
+        vessel_dir.mkdir()
+        data = {
+            "runner": {"module": "my_runner", "class_name": "MyRunner"},
+            "limits": {"max_retries": 5, "retry_delays": [10, 20]},
+            "capabilities": {"image_generation": True, "sandbox": True},
+        }
+        with open(vessel_dir / "vessel.yaml", "w") as f:
+            yaml.dump(data, f)
+
+        cfg = load_vessel_config(tmp_path)
+        assert cfg.runner.module == "my_runner"
+        assert cfg.runner.class_name == "MyRunner"
+        assert cfg.limits.max_retries == 5
+        assert cfg.limits.retry_delays == [10, 20]
+        assert cfg.capabilities.sandbox is True
+        assert not hasattr(cfg.capabilities, "image_generation")
+
+    def test_vessel_yaml_takes_priority_over_agent(self, tmp_path):
+        # Create both vessel/ and agent/
+        vessel_dir = tmp_path / "vessel"
+        vessel_dir.mkdir()
+        agent_dir = tmp_path / "agent"
+        agent_dir.mkdir()
+
+        with open(vessel_dir / "vessel.yaml", "w") as f:
+            yaml.dump({"limits": {"max_retries": 7}}, f)
+        with open(agent_dir / "manifest.yaml", "w") as f:
+            yaml.dump({"runner": {"module": "old", "class": "Old"}}, f)
+
+        cfg = load_vessel_config(tmp_path)
+        assert cfg.limits.max_retries == 7
+        assert cfg.runner.module == ""  # vessel.yaml wins, no runner there
+
+    def test_context_prompt_sections_parsed(self, tmp_path):
+        vessel_dir = tmp_path / "vessel"
+        vessel_dir.mkdir()
+        data = {
+            "context": {
+                "prompt_sections": [
+                    {"name": "persona", "file": "persona.md", "priority": 10},
+                    {"name": "skills", "file": "skills.md", "priority": 30},
+                ],
+                "inject_progress_log": False,
+            }
+        }
+        with open(vessel_dir / "vessel.yaml", "w") as f:
+            yaml.dump(data, f)
+
+        cfg = load_vessel_config(tmp_path)
+        assert len(cfg.context.prompt_sections) == 2
+        assert cfg.context.prompt_sections[0].name == "persona"
+        assert cfg.context.prompt_sections[0].priority == 10
+        assert cfg.context.inject_progress_log is False
+
+
+# ---------------------------------------------------------------------------
+# save_vessel_config
+# ---------------------------------------------------------------------------
+
+class TestSaveVesselConfig:
+    def test_save_and_reload(self, tmp_path):
+        cfg = VesselConfig(
+            runner=RunnerConfig(module="r", class_name="R"),
+            hooks=HooksConfig(module="h", pre_task="pre", post_task="post"),
+            context=ContextConfig(
+                prompt_sections=[PromptSection(name="x", file="x.md", priority=20)],
+                inject_progress_log=False,
+            ),
+            limits=LimitsConfig(max_retries=10),
+            capabilities=CapabilitiesConfig(sandbox=True),
+        )
+        save_vessel_config(tmp_path, cfg)
+
+        assert (tmp_path / "vessel" / "vessel.yaml").exists()
+        saved = yaml.safe_load((tmp_path / "vessel" / "vessel.yaml").read_text())
+        assert "image_generation" not in saved["capabilities"]
+
+        loaded = load_vessel_config(tmp_path)
+        assert loaded.runner.module == "r"
+        assert loaded.runner.class_name == "R"
+        assert loaded.hooks.pre_task == "pre"
+        assert loaded.context.inject_progress_log is False
+        assert len(loaded.context.prompt_sections) == 1
+        assert loaded.limits.max_retries == 10
+        assert loaded.capabilities.sandbox is True
+
+
+# ---------------------------------------------------------------------------
+# _load_default_vessel_config
+# ---------------------------------------------------------------------------
+
+class TestLoadDefaultVesselConfig:
+    def test_default_config_loads(self):
+        cfg = _load_default_vessel_config()
+        assert cfg.limits.max_retries == 3
+        assert cfg.capabilities.sandbox is False
+        assert cfg.capabilities.file_upload is False
+
+    def test_default_config_missing_yaml(self, monkeypatch):
+        """Line 152: returns VesselConfig() when default yaml is missing."""
+        from onemancompany.core import vessel_config as vc_mod
+        monkeypatch.setattr(vc_mod, "_DEFAULT_VESSEL_YAML", Path("/nonexistent/vessel.yaml"))
+        cfg = _load_default_vessel_config()
+        assert isinstance(cfg, VesselConfig)
+
+
+class TestLoadVesselConfigEdgeCases:
+    def test_yaml_error_falls_back_to_default(self, tmp_path, monkeypatch):
+        """Lines 169-170: YAMLError in vessel.yaml falls back to default."""
+        from onemancompany.core.vessel_config import VESSEL_DIR_NAME, VESSEL_YAML_FILENAME
+        vessel_dir = tmp_path / VESSEL_DIR_NAME
+        vessel_dir.mkdir()
+        (vessel_dir / VESSEL_YAML_FILENAME).write_text(": invalid: yaml: [")
+        cfg = load_vessel_config(tmp_path)
+        assert isinstance(cfg, VesselConfig)

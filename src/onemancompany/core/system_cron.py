@@ -1,0 +1,579 @@
+"""System Cron Registry — decorator-based periodic task management.
+
+System crons are infrastructure-level periodic tasks (heartbeat, review
+reminders, config reload). They differ from employee crons (automation.py)
+in that they run async functions directly (zero token cost) rather than
+pushing tasks to AI agents.
+
+Usage:
+    @system_cron("heartbeat", interval="1m", description="API connection checks")
+    async def heartbeat_check() -> list[CompanyEvent] | None:
+        ...
+
+All handlers are co-located in this module. The singleton `system_cron_manager`
+manages lifecycle. Wire it in main.py lifespan:
+
+    system_cron_manager.start_all()   # startup
+    system_cron_manager.stop_all()    # shutdown
+"""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable, Coroutine, Literal, TypedDict
+
+from loguru import logger
+
+from onemancompany.core.config import SYSTEM_SENDER, read_text_utf, write_text_utf
+from onemancompany.core.interval import parse_interval
+from onemancompany.core.models import EventType
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+REVIEW_REMINDER_THRESHOLD_SECONDS = 300  # 5 minutes
+
+
+@dataclass
+class SystemCronDef:
+    name: str
+    default_interval: str
+    description: str
+    handler: Callable[[], Coroutine[Any, Any, list | None]]
+    enabled_by_default: bool = True
+    current_interval: str = ""
+    current_interval_seconds: int = 0
+    last_run: datetime | None = None
+    run_count: int = 0
+    last_error: str | None = None
+
+    def __post_init__(self):
+        if not self.current_interval:
+            self.current_interval = self.default_interval
+            self.current_interval_seconds = parse_interval(self.default_interval) or 60
+
+
+class CronInfo(TypedDict):
+    name: str
+    interval: str
+    description: str
+    running: bool
+    scope: Literal["system", "employee"]
+    employee_id: str | None
+    last_run: str | None
+    run_count: int | None
+
+
+_registry: dict[str, SystemCronDef] = {}
+
+
+def system_cron(
+    name: str,
+    *,
+    interval: str,
+    description: str,
+    enabled_by_default: bool = True,
+    registry: dict[str, SystemCronDef] | None = None,
+):
+    """Decorator to register a system cron handler."""
+    target = registry if registry is not None else _registry
+    seconds = parse_interval(interval)
+    if seconds is None:
+        raise ValueError(f"Invalid interval: {interval!r}")
+
+    def decorator(fn):
+        target[name] = SystemCronDef(
+            name=name,
+            default_interval=interval,
+            description=description,
+            handler=fn,
+            enabled_by_default=enabled_by_default,
+        )
+        return fn
+    return decorator
+
+
+class SystemCronManager:
+    """Manages lifecycle of all system cron tasks.
+
+    Persists disabled crons to disk so they survive restarts.
+    """
+
+    def __init__(self, registry: dict[str, SystemCronDef] | None = None):
+        self._registry = registry if registry is not None else _registry
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._disabled: set[str] = set()  # crons explicitly disabled by user
+        self._enabled: set[str] = set()   # crons explicitly enabled (overrides enabled_by_default=False)
+        # Only load persisted state for the global registry (not test registries)
+        if registry is None:
+            self._load_persisted_state()
+
+    def _state_path(self):
+        from onemancompany.core.config import COMPANY_DIR
+        return COMPANY_DIR / "system_cron_state.yaml"
+
+    def _load_persisted_state(self) -> None:
+        """Load disabled cron names and custom intervals from disk."""
+        import yaml
+        path = self._state_path()
+        if not path.exists():
+            return
+        try:
+            data = yaml.safe_load(read_text_utf(path)) or {}
+            self._disabled = set(data.get("disabled", []))
+            self._enabled = set(data.get("enabled", []))
+            # Restore custom intervals
+            for name, interval in data.get("intervals", {}).items():
+                defn = self._registry.get(name)
+                if defn and interval:
+                    seconds = parse_interval(interval)
+                    if seconds:
+                        defn.current_interval = interval
+                        defn.current_interval_seconds = seconds
+            if self._disabled:
+                logger.info("[system_cron] Restored disabled crons from disk: {}", self._disabled)
+        except Exception as e:
+            logger.error("[system_cron] Failed to load persisted state: {}", e)
+
+    def _persist_state(self) -> None:
+        """Save disabled cron names and custom intervals to disk."""
+        import yaml
+        path = self._state_path()
+        intervals = {
+            name: defn.current_interval
+            for name, defn in self._registry.items()
+            if defn.current_interval != defn.default_interval
+        }
+        data = {
+            "disabled": sorted(self._disabled),
+            "enabled": sorted(self._enabled),
+            "intervals": intervals,
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_text_utf(path, yaml.dump(data, allow_unicode=True, default_flow_style=False))
+        except Exception as e:
+            logger.error("[system_cron] Failed to persist state: {}", e)
+
+    def start_all(self) -> None:
+        """Start all registered system crons, skipping disabled ones.
+
+        Crons with enabled_by_default=False are skipped unless the user
+        has explicitly enabled them (persisted in _enabled set on disk).
+        """
+        for name, defn in self._registry.items():
+            if not defn.enabled_by_default and name not in self._enabled:
+                self._disabled.add(name)
+        for name in self._registry:
+            if name in self._disabled:
+                logger.info("[system_cron] Skipping disabled cron: {}", name)
+                continue
+            if name not in self._tasks or self._tasks[name].done():
+                self.start(name)
+        logger.info("System crons started: {}", [n for n in self._registry if n not in self._disabled])
+
+    async def stop_all(self) -> None:
+        """Stop all running system crons."""
+        tasks_to_await = list(self._tasks.values())
+        for name in list(self._tasks.keys()):
+            self.stop(name)
+        if tasks_to_await:
+            await asyncio.gather(*tasks_to_await, return_exceptions=True)
+        self._tasks.clear()
+        logger.info("All system crons stopped")
+
+    def start(self, name: str, run_immediately: bool = False) -> dict:
+        """Start a single system cron by name. Removes from disabled set.
+
+        If run_immediately=True, triggers one execution before entering the loop.
+        """
+        defn = self._registry.get(name)
+        if not defn:
+            return {"status": "error", "message": f"Unknown system cron: {name}"}
+        existing = self._tasks.get(name)
+        if existing and not existing.done():
+            existing.cancel()
+        task = asyncio.create_task(
+            self._loop(defn, run_first=run_immediately),
+            name=f"system_cron:{name}",
+        )
+        self._tasks[name] = task
+        if name in self._disabled:
+            self._disabled.discard(name)
+        self._enabled.add(name)
+        self._persist_state()
+        return {"status": "ok", "name": name}
+
+    def stop(self, name: str) -> dict:
+        """Stop a single system cron by name. Persists disabled state to disk."""
+        task = self._tasks.pop(name, None)
+        if task and not task.done():
+            task.cancel()
+        self._disabled.add(name)
+        self._enabled.discard(name)
+        self._persist_state()
+        return {"status": "ok", "name": name}
+
+    def update_interval(self, name: str, new_interval: str) -> dict:
+        """Update interval for a system cron, restarting it if running. Persists to disk."""
+        defn = self._registry.get(name)
+        if not defn:
+            return {"status": "error", "message": f"Unknown system cron: {name}"}
+        seconds = parse_interval(new_interval)
+        if seconds is None:
+            return {"status": "error", "message": f"Invalid interval: {new_interval}"}
+        defn.current_interval = new_interval
+        defn.current_interval_seconds = seconds
+        self._persist_state()
+        if name in self._tasks and not self._tasks[name].done():
+            self.stop(name)
+            self.start(name)
+        return {"status": "ok", "name": name, "interval": new_interval}
+
+    def get_all(self) -> list[CronInfo]:
+        """Return info for all registered system crons."""
+        result: list[CronInfo] = []
+        for name, defn in self._registry.items():
+            task = self._tasks.get(name)
+            running = bool(task and not task.done())
+            result.append({
+                "name": defn.name,
+                "interval": defn.current_interval,
+                "description": defn.description,
+                "running": running,
+                "scope": SYSTEM_SENDER,
+                "employee_id": None,
+                "last_run": defn.last_run.isoformat() if defn.last_run else None,
+                "run_count": defn.run_count,
+            })
+        return result
+
+    async def _loop(self, cron_def: SystemCronDef, run_first: bool = False) -> None:
+        """Main loop for a single system cron."""
+        from onemancompany.core.events import event_bus
+
+        logger.info("[system_cron] Started '{}' every {}", cron_def.name, cron_def.current_interval)
+        try:
+            first_iteration = True
+            while True:
+                if first_iteration and run_first:
+                    first_iteration = False
+                    # Skip initial sleep — run immediately
+                else:
+                    await asyncio.sleep(cron_def.current_interval_seconds)
+                try:
+                    events = await cron_def.handler()
+                    cron_def.last_run = datetime.now()
+                    cron_def.run_count += 1
+                    cron_def.last_error = None
+                    if events:
+                        for event in events:
+                            await event_bus.publish(event)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error("[system_cron] '{}' error: {}", cron_def.name, e)
+                    cron_def.last_error = str(e)
+                    cron_def.last_run = datetime.now()
+                    cron_def.run_count += 1
+        except asyncio.CancelledError:
+            logger.info("[system_cron] Stopped '{}'", cron_def.name)
+            raise
+
+
+system_cron_manager = SystemCronManager()
+
+
+# ---------------------------------------------------------------------------
+# Handler implementations
+# ---------------------------------------------------------------------------
+
+@system_cron("heartbeat", interval="1m", description="Employee API connection check")
+async def heartbeat_check() -> list | None:
+    from onemancompany.core.heartbeat import run_heartbeat_cycle
+    from onemancompany.core.events import CompanyEvent
+
+    changed = await run_heartbeat_cycle()
+    if changed:
+        return [CompanyEvent(type=EventType.STATE_SNAPSHOT, payload={}, agent="HEARTBEAT")]
+    return None
+
+
+@system_cron("review_reminder", interval="5m", description="Review timeout reminder")
+async def review_reminder_check() -> list | None:
+    from onemancompany.core.vessel import scan_overdue_reviews
+    from onemancompany.core.events import CompanyEvent
+
+    overdue = scan_overdue_reviews(threshold_seconds=REVIEW_REMINDER_THRESHOLD_SECONDS)
+    if overdue:
+        return [CompanyEvent(
+            type=EventType.REVIEW_REMINDER,
+            payload={"overdue_nodes": overdue},
+            agent="REVIEW_REMINDER",
+        )]
+    return None
+
+
+@system_cron("config_reload", interval="30s", description="Disk config periodic reload")
+async def config_reload_check() -> list | None:
+    from onemancompany.core.state import is_idle, reload_all_from_disk
+
+    if is_idle():
+        result = reload_all_from_disk()
+        updated = result.get("employees_updated", [])
+        added = result.get("employees_added", [])
+        if updated or added:
+            logger.info("[config_reload] {} updated, {} added", len(updated), len(added))
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Talent Market keepalive — maintain MCP connection
+# ---------------------------------------------------------------------------
+
+
+@system_cron("talent_market_keepalive", interval="15s", description="Talent Market MCP keepalive")
+async def talent_market_keepalive() -> list | None:
+    """Ping the Talent Market MCP server; reconnect if the session is dead."""
+    from onemancompany.agents.recruitment import talent_market, start_talent_market
+
+    if not talent_market.connected:
+        return None
+
+    try:
+        await talent_market._session.send_ping()
+        logger.debug("[talent_market_keepalive] ping OK")
+    except Exception as e:
+        logger.warning("[talent_market_keepalive] ping failed ({}), reconnecting...", e)
+        try:
+            await talent_market._reconnect()
+            logger.info("[talent_market_keepalive] reconnected successfully")
+        except Exception as e2:
+            logger.error("[talent_market_keepalive] reconnect failed: {}", e2)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Project progress watchdog — prevent projects from getting stuck
+# ---------------------------------------------------------------------------
+
+# Track projects we've already nudged (cleared when EA picks up the task)
+_watchdog_nudged: set[str] = set()
+
+
+@system_cron("project_progress_watchdog", interval="10m", description="Project progress watchdog — prevent stuck projects", enabled_by_default=False)
+async def project_progress_watchdog() -> list | None:
+    """Scan active projects; nudge EA to continue any that are stuck.
+
+    A project is "stuck" when:
+    - No node is currently in ``processing`` state (nobody is working on it)
+    - Not all active-branch nodes have reached a terminal state
+    - The project hasn't been nudged yet since the last check
+
+    When stuck, a new task node is added under the EA node asking it to
+    review the task tree and drive the project forward.
+    """
+    from onemancompany.core.config import EA_ID, PROJECTS_DIR, TASK_TREE_FILENAME
+    from onemancompany.core.task_lifecycle import TaskPhase, RESOLVED, NodeType
+    from onemancompany.core.task_tree import get_tree, get_tree_lock, save_tree_async
+    from onemancompany.core.vessel import employee_manager
+
+    if not PROJECTS_DIR.exists():
+        return None
+
+    nudged_projects: list[str] = []
+
+    for tree_path in PROJECTS_DIR.rglob(TASK_TREE_FILENAME):
+        tree_path_str = str(tree_path)
+        try:
+            tree = get_tree(tree_path_str)
+        except Exception as e:
+            logger.debug("[watchdog] Skipping corrupt tree: {} — {}", tree_path, e)
+            continue
+
+        project_id = tree.project_id
+        if not project_id:
+            continue
+
+        # Skip archived projects
+        from onemancompany.core.project_archive import load_named_project, PROJECT_STATUS_ARCHIVED
+        named_pid = project_id.split("/")[0] if "/" in project_id else project_id
+        named_proj = load_named_project(named_pid)
+        if named_proj and named_proj.get("status") == PROJECT_STATUS_ARCHIVED:
+            continue
+
+        # Skip projects we've already nudged (waiting for EA to pick it up)
+        if project_id in _watchdog_nudged:
+            continue
+
+        # Only look at active-branch nodes (exclude root ceo_prompt)
+        active_nodes = [
+            n for n in tree.all_nodes()
+            if n.branch_active and n.id != tree.root_id
+        ]
+        if not active_nodes:
+            continue
+
+        # Skip if any node is currently being processed — someone is working
+        if any(n.status == TaskPhase.PROCESSING.value for n in active_nodes):
+            continue
+
+        # Skip if there are still unfinished watchdog nudge subtrees
+        # OR if a nudge was recently completed (cooldown: 10 min)
+        from datetime import datetime as _dt
+        skip_nudge = False
+        for n in active_nodes:
+            if n.node_type != NodeType.WATCHDOG_NUDGE:
+                continue
+            # Unfinished nudge or its children
+            if TaskPhase(n.status) not in RESOLVED:
+                skip_nudge = True
+                break
+            nudge_children = [tree.get_node(cid) for cid in n.children_ids if cid in tree._nodes]
+            if any(c and TaskPhase(c.status) not in RESOLVED for c in nudge_children):
+                skip_nudge = True
+                break
+            # Recently finished nudge — cooldown to avoid spam
+            if n.completed_at:
+                try:
+                    completed = _dt.fromisoformat(n.completed_at).replace(tzinfo=None)
+                    if (_dt.now() - completed).total_seconds() < 600:
+                        skip_nudge = True
+                        break
+                except (ValueError, TypeError) as _e:
+                    logger.debug("[watchdog] Invalid completed_at for nudge {}: {}", n.id, _e)
+        if skip_nudge:
+            logger.debug("[watchdog] Skipping {} — recent or active nudge", project_id)
+            continue
+
+        # Skip if all active nodes are resolved (project is done)
+        all_resolved = all(
+            TaskPhase(n.status) in RESOLVED for n in active_nodes
+        )
+        if all_resolved:
+            continue
+
+        # --- Project is stuck — nudge EA ---
+        ea_node = tree.get_ea_node()
+        if not ea_node:
+            logger.debug("[watchdog] No EA node found for project {}", project_id)
+            continue
+
+        # Build a summary of the current tree state for EA
+        status_summary = _build_tree_status_summary(tree)
+
+        project_abs_path = str(tree_path.parent.resolve())
+        nudge_desc = (
+            f"[Project Progress Watchdog] Project {project_id} has unfinished task nodes with no one executing.\n"
+            f"Project path: {project_abs_path}\n\n"
+            f"Review the task tree status and take action to continue:\n\n"
+            f"{status_summary}\n\n"
+            f"Actions based on current state:\n"
+            f"- If tasks are completed: accept_child or reject_child\n"
+            f"- If tasks are failed/blocked: decide to retry or skip\n"
+            f"- If new tasks are needed: dispatch_child\n"
+            f"- If the project cannot continue: explain why"
+        )
+
+        lock = get_tree_lock(tree_path_str)
+        with lock:
+            nudge_node = tree.add_child(
+                parent_id=tree.root_id,
+                employee_id=EA_ID,
+                description=nudge_desc,
+                acceptance_criteria=[],
+            )
+            nudge_node.node_type = NodeType.WATCHDOG_NUDGE
+            nudge_node.project_id = project_id
+            nudge_node.project_dir = ea_node.project_dir or str(tree_path.parent)
+            save_tree_async(tree_path_str)
+
+        employee_manager.push_task(
+            EA_ID, description="", node_id=nudge_node.id, tree_path=tree_path_str,
+        )
+
+        _watchdog_nudged.add(project_id)
+        nudged_projects.append(project_id)
+        logger.info("[watchdog] Nudged EA to continue stuck project {}", project_id)
+
+    if nudged_projects:
+        from onemancompany.core.events import CompanyEvent
+
+        return [CompanyEvent(
+            type=EventType.STATE_SNAPSHOT,
+            payload={"watchdog_nudged": nudged_projects},
+            agent="PROJECT_WATCHDOG",
+        )]
+    return None
+
+
+@system_cron("holding_timeout_sweep", interval="10m", description="HOLDING timeout sweep — auto-fail expired tasks")
+async def holding_timeout_sweep() -> list | None:
+    """Scan all scheduled HOLDING nodes and auto-fail those exceeding MAX_HOLD_SECONDS."""
+    from onemancompany.core.vessel import employee_manager
+
+    timed_out: list[str] = []
+    for emp_id, entries in list(employee_manager._schedule.items()):
+        for entry in list(entries):
+            result = employee_manager._check_holding_timeout(entry.tree_path, entry.node_id)
+            if result:
+                timed_out.append(entry.node_id)
+                employee_manager.unschedule(emp_id, entry.node_id)
+                # Cascade: trigger dep resolution so dependents get BLOCKED/CANCELLED
+                try:
+                    from pathlib import Path as _Path
+                    from onemancompany.core.task_tree import get_tree
+                    from onemancompany.core.vessel import _trigger_dep_resolution
+                    tree = get_tree(entry.tree_path)
+                    node = tree.get_node(entry.node_id)
+                    if node:
+                        _trigger_dep_resolution(str(_Path(entry.tree_path).parent), tree, node)
+                except Exception as e:
+                    logger.error("[holding_timeout_sweep] dep resolution failed for {}: {}", entry.node_id, e)
+
+    if timed_out:
+        logger.info("[holding_timeout_sweep] Auto-failed {} timed-out HOLDING node(s): {}",
+                     len(timed_out), timed_out)
+    return None
+
+
+def clear_watchdog_nudge(project_id: str) -> None:
+    """Clear the nudge flag for a project (call when EA starts working on it)."""
+    _watchdog_nudged.discard(project_id)
+
+
+@system_cron("schedule_cleanup", interval="10m", description="Clean up orphaned schedule entries")
+async def schedule_cleanup() -> list | None:
+    """Periodically clean up orphaned schedule entries."""
+    from onemancompany.core.vessel import employee_manager
+    employee_manager.cleanup_orphaned_schedule()
+    return None
+
+
+def _build_tree_status_summary(tree) -> str:
+    """Build a concise status summary of all active nodes in the tree."""
+    lines = []
+    active_nodes = [
+        n for n in tree.all_nodes()
+        if n.branch_active and n.id != tree.root_id
+    ]
+    # Group by status
+    by_status: dict[str, list] = {}
+    for n in active_nodes:
+        by_status.setdefault(n.status, []).append(n)
+
+    from onemancompany.core.task_lifecycle import TaskPhase
+    for status in [p.value for p in TaskPhase]:
+        nodes = by_status.get(status, [])
+        if not nodes:
+            continue
+        lines.append(f"[{status}] ({len(nodes)}):")
+        for n in nodes[:5]:  # Cap at 5 per status to keep prompt manageable
+            preview = n.description_preview or n.id
+            lines.append(f"  - [{n.employee_id}] {preview[:100]}")
+        if len(nodes) > 5:
+            lines.append(f"  ... and {len(nodes) - 5} more")
+
+    return "\n".join(lines)

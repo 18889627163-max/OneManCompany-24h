@@ -1,0 +1,1109 @@
+"""TUI onboarding wizard for OneManCompany.
+
+Run via `onemancompany-init` to bootstrap the .onemancompany/ data directory.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+from rich.align import Align
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SOURCE_ROOT = Path(__file__).parent.parent.parent
+
+from onemancompany.core.config import (
+    COMPANY_TEMPLATE_DIR, CONFIG_YAML_FILENAME,
+    DATA_DIR_NAME, DOT_ENV_FILENAME, EMPLOYEES_DIR,
+    ENV_KEY_ANTHROPIC, ENV_KEY_ANTHROPIC_AUTH, ENV_KEY_CUSTOM_CHAT_CLASS,
+    ENV_KEY_DEFAULT_BASE_URL, ENV_KEY_DEFAULT_MODEL,
+    ENV_KEY_DEFAULT_PROVIDER, ENV_KEY_HOST, ENV_KEY_OPENROUTER,
+    ENV_KEY_PORT, ENV_KEY_SANDBOX_ENABLED, ENV_KEY_SKILLSMP,
+    ENV_KEY_TALENT_MARKET,
+    ENV_OMC_EMPLOYEE_ID, ENV_OMC_PROJECT_DIR, ENV_OMC_PROJECT_ID,
+    ENV_OMC_SERVER_URL, ENV_OMC_TASK_ID, HR_DIR, MCP_CONFIG_FILENAME,
+    PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER, TOOLS_DIR,
+    WORKSPACE_DIR_NAME,
+    read_text_utf,
+    write_text_utf,
+)
+from onemancompany.core.models import AuthMethod
+_data_root_override = os.environ.get("OMC_DATA_ROOT", "").strip()
+DATA_ROOT = Path(_data_root_override).expanduser() if _data_root_override else Path.cwd() / DATA_DIR_NAME
+if not DATA_ROOT.is_absolute():
+    DATA_ROOT = (Path.cwd() / DATA_ROOT).resolve()
+
+# OpenRouter API response field names
+OR_FIELD_ID = "id"
+OR_FIELD_NAME = "name"
+OR_FIELD_PRICING = "pricing"
+OR_FIELD_PROMPT = "prompt"
+OR_FIELD_COMPLETION = "completion"
+OR_FIELD_CONTEXT_LENGTH = "context_length"
+OR_FIELD_DATA = "data"
+
+# Price display
+PRICE_FREE = "free"
+PRICE_NA = "N/A"
+
+# Internal model dict keys
+MODEL_KEY_ID = "id"
+MODEL_KEY_NAME = "name"
+MODEL_KEY_PROMPT_PRICE = "prompt_price"
+MODEL_KEY_COMPLETION_PRICE = "completion_price"
+MODEL_KEY_CONTEXT = "context"
+
+# Table column headers
+COL_NUM = "#"
+COL_MODEL_ID = "Model ID"
+COL_NAME = "Name"
+COL_PROMPT = "Prompt"
+COL_COMPLETION = "Completion"
+COL_CONTEXT = "Context"
+COL_PROVIDER = "Provider"
+COL_AUTH_METHODS = "Auth Methods"
+
+LOGO = r"""
+ ░▒▓  ██████╗ ███╗   ███╗ ██████╗
+ ░▒▓ ██╔═══██╗████╗ ████║██╔════╝
+ ░▒▓ ██║   ██║██╔████╔██║██║
+ ░▒▓ ██║   ██║██║╚██╔╝██║██║
+ ░▒▓ ╚██████╔╝██║ ╚═╝ ██║╚██████╗
+ ░▒▓  ╚═════╝ ╚═╝     ╚═╝ ╚═════╝
+
+ ░▒▓  O N E   M A N   C O M P A N Y
+ ░▒▓  ═══════════════════════════
+ ░▒▓  [ NEURAL BOOTSTRAP SEQUENCE ]
+"""
+
+TOTAL_STEPS = 5
+
+HOSTING_LABELS = {"company": "LangChain", "self": "Claude Code", "openclaw": "OpenClaw"}
+
+# InquirerPy theme — cyberpunk neon
+from InquirerPy.utils import InquirerPyStyle as _IStyle
+INQ_STYLE = _IStyle({"questionmark": "#ff44cc", "pointer": "#00e5ff", "highlighted": "#00e5ff",
+                      "input": "#39ff14", "answer": "#39ff14", "checkbox": "#39ff14"})
+
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+PAGE_SIZE = 15
+
+# Default model per provider (non-OpenRouter)
+PROVIDER_DEFAULT_MODELS = {
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-20250514",
+    "deepseek": "deepseek-chat",
+    "kimi": "moonshot-v1-8k",
+    "qwen": "qwen-plus",
+    "zhipu": "glm-4",
+    "groq": "llama-3.3-70b-versatile",
+    "together": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+    "google": "gemini-2.0-flash",
+    "minimax": "MiniMax-Text-01",
+}
+
+
+# ---------------------------------------------------------------------------
+# Wizard steps
+# ---------------------------------------------------------------------------
+
+def _print_step(console: Console, num: int, codename: str, subtitle: str) -> None:
+    """Print a cyberpunk-styled step header with lightning decorations."""
+    console.print()
+    console.print(Panel(
+        f"[bold bright_cyan]{codename}[/bold bright_cyan] [dim]// {subtitle}[/dim]",
+        title=f"[bright_magenta]⚡ STEP {num:02d}/{TOTAL_STEPS:02d} ⚡[/bright_magenta]",
+        border_style="bright_magenta",
+        expand=True,
+        padding=(0, 1),
+    ))
+
+def _pad_art(text: str) -> str:
+    """Pad all lines in ASCII art to equal width with trailing spaces.
+
+    Rich's justify="center" strips trailing spaces before centering,
+    so we must NOT rely on ljust + center. Instead, the art is rendered
+    with justify="left" inside a centered Align wrapper.
+    """
+    lines = text.splitlines()
+    max_len = max((len(l) for l in lines), default=0)
+    return "\n".join(l.ljust(max_len) for l in lines)
+
+
+def _step_welcome(console: Console) -> None:
+    console.print(Panel(
+        Align.center(Text(_pad_art(LOGO), style="bold bright_cyan")),
+        border_style="bright_magenta",
+        padding=(1, 2),
+        expand=True,
+    ))
+    console.print()
+    console.print(Panel(
+        "[bold bright_green]⚡ INITIATING NEURAL BOOTSTRAP ⚡[/bold bright_green]\n\n"
+        "[bright_white]Your AI company is about to come online.\n"
+        "In 60 seconds, a full executive team will be deployed.[/bright_white]",
+        border_style="bright_cyan",
+        expand=True,
+        padding=(1, 2),
+    ))
+    console.print()
+
+
+def _format_price(price_str: str | None) -> str:
+    """Format per-token price string to $/M tokens."""
+    if price_str is None or price_str == "":
+        return PRICE_NA
+    try:
+        per_token = float(price_str)
+        per_million = per_token * 1_000_000
+        if per_million == 0:
+            return PRICE_FREE
+        if per_million < 0.01:
+            return f"${per_million:.4f}/M"
+        return f"${per_million:.2f}/M"
+    except (ValueError, TypeError):
+        return PRICE_NA
+
+
+def _fetch_provider_models(console: Console, provider: str, api_key: str) -> list[dict]:
+    """Fetch model list from any provider's /models endpoint.
+
+    Returns list of dicts with keys: id, name.
+    Falls back to empty list on failure.
+    """
+    from onemancompany.core.config import get_provider
+
+    prov_cfg = get_provider(provider)
+    if not prov_cfg:
+        return []
+
+    # Determine models URL
+    if prov_cfg.base_url:
+        models_url = f"{prov_cfg.base_url.rstrip('/')}/models"
+    elif prov_cfg.health_url and "/models" in prov_cfg.health_url:
+        models_url = prov_cfg.health_url
+    else:
+        return []
+
+    # Build auth
+    headers: dict[str, str] = {}
+    params: dict[str, str] = {}
+    if prov_cfg.health_auth == "anthropic":
+        headers["x-api-key"] = api_key
+        headers["anthropic-version"] = "2023-06-01"
+    elif prov_cfg.health_auth == "query_param":
+        params["key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    label = provider.capitalize()
+    with console.status(f"  Fetching models from {label}..."):
+        try:
+            resp = httpx.get(models_url, headers=headers, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            console.print(f"  [yellow]⚠[/yellow] Failed to fetch models from {label}: {e}")
+            return []
+
+    # Normalize response formats
+    raw: list[dict] = data.get("data", []) or data.get("models", [])
+    models = []
+    for m in raw:
+        model_id = m.get("id") or m.get("name", "")
+        if model_id.startswith("models/"):
+            model_id = model_id[len("models/"):]
+        display_name = m.get("display_name") or m.get("displayName") or model_id
+        # For OpenRouter, include pricing
+        pricing = m.get(OR_FIELD_PRICING, {}) or {}
+        models.append({
+            MODEL_KEY_ID: model_id,
+            MODEL_KEY_NAME: display_name,
+            MODEL_KEY_PROMPT_PRICE: _format_price(pricing.get(OR_FIELD_PROMPT) if pricing else None),
+            MODEL_KEY_COMPLETION_PRICE: _format_price(pricing.get(OR_FIELD_COMPLETION) if pricing else None),
+            MODEL_KEY_CONTEXT: m.get(OR_FIELD_CONTEXT_LENGTH) or m.get("context_length") or 0,
+        })
+
+    models.sort(key=lambda m: m[MODEL_KEY_ID])
+    return models
+
+
+def _fetch_openrouter_models(console: Console) -> list[dict]:
+    """Fetch model list from OpenRouter API. Returns list of model dicts."""
+    # Delegate to generic fetcher (no API key needed for OpenRouter model list)
+    return _fetch_provider_models(console, "openrouter", "")
+
+
+def _print_model_page(
+    console: Console,
+    models: list[dict],
+    page: int,
+    total_pages: int,
+    offset: int = 0,
+    search_term: str = "",
+) -> None:
+    """Print a page of models as a Rich table."""
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    table.add_column(COL_NUM, style="cyan", width=5)
+    table.add_column(COL_MODEL_ID, min_width=35)
+    table.add_column(COL_NAME, min_width=20)
+    table.add_column(COL_PROMPT, justify="right", width=12)
+    table.add_column(COL_COMPLETION, justify="right", width=12)
+    table.add_column(COL_CONTEXT, justify="right", width=10)
+
+    start = page * PAGE_SIZE
+    end = min(start + PAGE_SIZE, len(models))
+    for i in range(start, end):
+        m = models[i]
+        num = str(offset + i + 1)
+        ctx = f"{m[MODEL_KEY_CONTEXT] // 1000}k" if m[MODEL_KEY_CONTEXT] else "—"
+        table.add_row(num, m[MODEL_KEY_ID], m[MODEL_KEY_NAME], m[MODEL_KEY_PROMPT_PRICE], m[MODEL_KEY_COMPLETION_PRICE], ctx)
+
+    title = f"  Models (page {page + 1}/{total_pages})"
+    if search_term:
+        title += f"  —  filter: [yellow]{search_term}[/yellow]"
+    console.print(title)
+    console.print(table)
+    console.print(
+        "  [dim]Enter [cyan]number[/cyan] to select  |  "
+        "type to [cyan]search[/cyan]  |  "
+        "[cyan]n[/cyan]ext  [cyan]p[/cyan]rev  "
+        "[cyan]a[/cyan]ll (reset filter)  "
+        "[cyan]c[/cyan]ustom model ID[/dim]\n"
+    )
+
+
+def _select_model_interactive(console: Console, all_models: list[dict]) -> str:
+    """Interactive model selector with fuzzy search."""
+    from InquirerPy import inquirer as _inq
+
+    if not all_models:
+        console.print("  [yellow]Could not load model list.[/yellow]")
+        return _inq.text(
+            message="Enter model ID (e.g. anthropic/claude-sonnet-4):",
+            style=INQ_STYLE,
+        ).execute().strip()
+
+    # Build choices with pricing info
+    choices = []
+    for m in all_models:
+        prompt_price = m.get(MODEL_KEY_PROMPT_PRICE) or PRICE_NA
+        comp_price = m.get(MODEL_KEY_COMPLETION_PRICE) or PRICE_NA
+        label = f"{m[MODEL_KEY_ID]}  [{prompt_price} / {comp_price}]"
+        choices.append({"name": label, "value": m[MODEL_KEY_ID]})
+
+    model = _inq.fuzzy(
+        message="Select model (type to filter):",
+        choices=choices,
+        max_height="30",
+        style=_IStyle({**INQ_STYLE.dict, "fuzzy_match": "#ff44cc"}),
+    ).execute()
+
+    console.print(f"  [bright_green]▸[/bright_green] Selected: [bold bright_cyan]{model}[/bold bright_cyan]")
+    return model
+
+
+def _step_llm(console: Console) -> tuple[str, str, str, str]:
+    """Select provider, enter API key, choose model. Returns (provider, api_key, model)."""
+    from onemancompany.core.auth_choices import AUTH_CHOICE_GROUPS
+    from onemancompany.core.config import PROVIDER_REGISTRY
+
+    _print_step(console, 2, "NEURAL CORE", "LLM Configuration")
+    console.print(
+        "\n  [dim]Select the neural substrate for your employees.[/dim]\n"
+        "  [dim]Each agent's model can be reconfigured later via the web UI.[/dim]\n"
+    )
+
+    # 1. Select provider
+    available_groups = [
+        g for g in AUTH_CHOICE_GROUPS
+        if any(c.available and c.auth_method == AuthMethod.API_KEY for c in g.choices)
+    ]
+    from InquirerPy import inquirer as _inq
+
+    provider_choices = [
+        {"name": f"{g.label}  ({g.hint})", "value": g.group_id}
+        for g in available_groups
+    ]
+    or_default = PROVIDER_OPENROUTER if any(g.group_id == PROVIDER_OPENROUTER for g in available_groups) else available_groups[0].group_id
+
+    provider = _inq.select(
+        message="Select LLM provider:",
+        choices=provider_choices,
+        default=or_default,
+        style=INQ_STYLE,
+    ).execute()
+
+    selected_group = next(g for g in available_groups if g.group_id == provider)
+    console.print(f"\n  [bright_green]▸[/bright_green] Selected: [bold bright_cyan]{selected_group.label}[/bold bright_cyan]\n")
+
+    # 2. Enter API key
+    console.print(
+        f"  [dim]Paste your {selected_group.label} API key below.[/dim]\n"
+        f"  [dim]Input is hidden for security.[/dim]"
+    )
+    while True:
+        api_key = _inq.secret(
+            message=f"{selected_group.label} API Key:",
+            style=INQ_STYLE,
+        ).execute()
+        if api_key.strip():
+            break
+        console.print("  [red]API key is required — your employees can't think without it.[/red]")
+
+    # 3. Custom provider: ask for API compatibility and base URL
+    base_url = ""
+    custom_chat_class = ""
+    if provider == "custom":
+        # Custom provider — ask API format, keep provider as "custom"
+        custom_chat_class = _inq.select(
+            message="API compatibility:",
+            choices=[
+                {"name": "OpenAI-compatible (most providers)", "value": "openai"},
+                {"name": "Anthropic-compatible", "value": "anthropic"},
+            ],
+            default="openai",
+            style=INQ_STYLE,
+        ).execute()
+        console.print(
+            f"\n  [dim]Enter your API base URL.[/dim]\n"
+            f"  [dim]Examples: https://api.openai.com/v1, https://your-server.com/v1[/dim]"
+        )
+        base_url = _inq.text(
+            message="Base URL:",
+            default="",
+            style=INQ_STYLE,
+        ).execute().strip()
+        if not base_url:
+            console.print("  [red]Base URL is required for custom providers.[/red]")
+            base_url = _inq.text(message="Base URL:", style=INQ_STYLE).execute().strip()
+
+    # 3b. Azure AI Foundry: build the OpenAI-compatible v1 endpoint from a resource
+    #     name (or accept a full URL), then take the model id as the deployment name.
+    if provider == "azure":
+        console.print(
+            "\n  [dim]Enter your Azure resource name or full endpoint.[/dim]\n"
+            "  [dim]Name 'myres' -> https://myres.services.ai.azure.com/openai/v1/[/dim]"
+        )
+        while not base_url:
+            resource = _inq.text(
+                message="Azure resource name or endpoint URL:",
+                default="",
+                style=INQ_STYLE,
+            ).execute().strip()
+            if resource:
+                base_url = _azure_base_url(resource)
+            if not base_url:
+                console.print("  [red]An Azure resource name or endpoint URL is required.[/red]")
+        console.print(f"  [bright_green]▸[/bright_green] Endpoint: [bold bright_cyan]{base_url}[/bold bright_cyan]")
+
+    # 4. Select model — for Azure the id is the deployment name (manual entry);
+    #    otherwise try fetching from the provider, falling back to manual input.
+    if provider == "azure":
+        console.print(
+            "\n  [dim]Enter your Azure *deployment name* (not the base model id).[/dim]"
+        )
+        model = ""
+        while not model:
+            model = _inq.text(message="Deployment name:", style=INQ_STYLE).execute().strip()
+            if not model:
+                console.print("  [red]Deployment name is required for Azure.[/red]")
+        console.print(f"  [bright_green]▸[/bright_green] Deployment: [bold bright_cyan]{model}[/bold bright_cyan]")
+    else:
+        model = _select_or_enter_model(console, provider, api_key)
+    return provider, api_key.strip(), model, base_url, custom_chat_class
+
+
+def _azure_base_url(resource: str) -> str:
+    """Build the Azure Foundry OpenAI-compatible v1 base URL from a resource name.
+
+    Accepts a bare resource name (``myres``) or a full endpoint URL. Any URL is
+    normalized to end with ``/openai/v1/`` so ``ChatOpenAI`` hits the v1 API.
+    """
+    resource = resource.strip().rstrip("/")
+    if not resource:
+        return ""
+    if resource.startswith(("http://", "https://")):
+        host = resource
+    else:
+        host = f"https://{resource}.services.ai.azure.com"
+    # Normalize to the /openai/v1/ form regardless of what the user pasted.
+    marker = "/openai/v1"
+    idx = host.find(marker)
+    if idx != -1:
+        host = host[:idx]
+    return f"{host}/openai/v1/"
+
+
+def _select_or_enter_model(console: Console, provider: str, api_key: str) -> str:
+    from InquirerPy import inquirer as _inq
+
+    console.print()
+    all_models = _fetch_provider_models(console, provider, api_key)
+    if all_models:
+        console.print(f"  [green]✔[/green] Found {len(all_models)} models")
+        model = _select_model_interactive(console, all_models)
+    else:
+        # Fetch failed — fall back to manual input with known defaults
+        default_model = PROVIDER_DEFAULT_MODELS.get(provider, "")
+        model = _inq.text(
+            message="Model ID:",
+            default=default_model,
+            style=INQ_STYLE,
+        ).execute().strip()
+    return model
+
+
+def _step_server(console: Console) -> tuple[str, int]:
+    console.print()
+    _print_step(console, 4, "NETWORK NODE", "Server Configuration")
+    console.print(
+        "\n  [dim]Deploy your company node on the local network.[/dim]\n"
+        "  [dim]After genesis, open the URL to enter your office.[/dim]\n"
+    )
+    console.print(
+        f"  Default: [bold]http://0.0.0.0:8000[/bold]\n"
+        f"  [dim]0.0.0.0 means accessible from any device on your network.\n"
+        f"  Use 127.0.0.1 for local-only access.[/dim]\n"
+    )
+
+    from InquirerPy import inquirer as _inq
+    console.print()
+    use_defaults = _inq.confirm(
+        message="Use default host/port (0.0.0.0:8000)?",
+        default=True,
+        style=INQ_STYLE,
+    ).execute()
+    if use_defaults:
+        console.print("  [green]✔[/green] Using [bold]0.0.0.0:8000[/bold]\n")
+        return "0.0.0.0", 8000
+
+    host = _inq.text(
+        message="Host:",
+        default="0.0.0.0",
+        style=INQ_STYLE,
+    ).execute()
+    port_str = _inq.text(
+        message="Port:",
+        default="8000",
+        style=INQ_STYLE,
+    ).execute()
+    try:
+        port = int(port_str)
+    except ValueError:
+        port = 8000
+
+    return host, port
+
+
+def _step_agent_family(console: Console) -> dict[str, str]:
+    """Ask which agent families to enable and assign to each founding employee.
+
+    Returns:
+        Dict mapping employee_id → hosting value (company/self/openclaw).
+    """
+    from onemancompany.core.config import HR_ID, COO_ID, EA_ID, CSO_ID
+
+    _print_step(console, 1, "VESSEL DEPLOY", "Agent Family Assignment")
+    console.print(
+        "\n  [dim]Each vessel carries an AI consciousness.[/dim]\n"
+        "  [dim]Select the agent families available to your founding team.[/dim]\n"
+    )
+
+    # Show options with Rich Table (auto-expands to terminal width)
+    vessel_table = Table(
+        show_header=True, header_style="bold bright_cyan",
+        border_style="bright_cyan", expand=True, padding=(0, 1),
+    )
+    vessel_table.add_column("#", style="bold", width=3, justify="center")
+    vessel_table.add_column("Vessel Type", min_width=14)
+    vessel_table.add_column("Neural Substrate")
+    vessel_table.add_row("[bright_green]1[/bright_green]", "[bright_green]LangChain[/bright_green]", "Built-in Python agent [dim](default)[/dim]")
+    vessel_table.add_row("[bright_yellow]2[/bright_yellow]", "[bright_yellow]Claude Code[/bright_yellow]", "Claude CLI via MCP bridge")
+    vessel_table.add_row("[bright_red]3[/bright_red]", "[bright_red]OpenClaw[/bright_red]", "OpenClaw gateway subprocess [dim]🦞[/dim]")
+    console.print(vessel_table)
+
+    # Multi-select which families to enable (space to toggle, enter to confirm)
+    from InquirerPy import inquirer as _inq
+
+    console.print()
+    console.print("  [dim]Use ↑↓ to navigate, Space to select, Enter to confirm[/dim]\n")
+
+    family_choices = [
+        {"name": "LangChain    — Built-in Python agent (default)", "value": "company", "enabled": True},
+        {"name": "Claude Code  — Claude CLI via MCP bridge", "value": "self"},
+        {"name": "OpenClaw     — OpenClaw gateway subprocess 🦞", "value": "openclaw"},
+    ]
+    selected = _inq.checkbox(
+        message="Select agent families:",
+        choices=family_choices,
+        style=_IStyle({**INQ_STYLE.dict, "instruction": "#888"}),
+        instruction="(Space=toggle, Enter=confirm)",
+        validate=lambda result: len(result) > 0,
+        invalid_message="Select at least one agent family.",
+    ).execute()
+
+    families_enabled = set(selected)
+    family_labels = HOSTING_LABELS
+    console.print(f"\n  [bright_green]▸ ENABLED:[/bright_green] [bold bright_cyan]{', '.join(family_labels[f] for f in sorted(families_enabled))}[/bold bright_cyan]\n")
+
+    # If only one family enabled, assign all founders to it
+    if len(families_enabled) == 1:
+        only_family = next(iter(families_enabled))
+        founders = {HR_ID: only_family, COO_ID: only_family, EA_ID: only_family, CSO_ID: only_family}
+        console.print(f"\n  [bright_green]⚡ ALL VESSELS LOCKED TO[/bright_green] [bold bright_cyan]{family_labels[only_family]}[/bold bright_cyan] [bright_green]⚡[/bright_green]\n")
+        return founders
+
+    # Multiple families — ask per founder with list selector
+    console.print()
+    console.print("  [bright_magenta]⚡━━━ VESSEL ASSIGNMENT PROTOCOL ━━━⚡[/bright_magenta]")
+    console.print("  [dim]Designate the neural architecture for each executive:[/dim]\n")
+
+    founder_display = [
+        (EA_ID, "Pat EA       // Executive Assistant"),
+        (HR_ID, "Sam HR       // Human Resources"),
+        (COO_ID, "Alex COO     // Chief Operating Officer"),
+        (CSO_ID, "Morgan CSO   // Chief Sales Officer"),
+    ]
+    family_options = [{"name": family_labels[f], "value": f} for f in ["company", "self", "openclaw"] if f in families_enabled]
+
+    founders: dict[str, str] = {}
+    for emp_id, display_name in founder_display:
+        hosting = _inq.select(
+            message=f"{display_name}:",
+            choices=family_options,
+            default=family_options[0]["value"],
+            style=INQ_STYLE,
+        ).execute()
+        founders[emp_id] = hosting
+        console.print(f"    [bright_green]⚡ VESSEL LOCKED → {family_labels[hosting]}[/bright_green]")
+
+    console.print()
+    return founders
+
+
+def _step_optional(console: Console) -> dict[str, str]:
+    console.print()
+    _print_step(console, 3, "UPLINK ARRAY", "External Integrations")
+    console.print(
+        "\n  [dim]These are all optional.\n"
+        "  Paste a key and press [bold]Enter[/bold] to save it,\n"
+        "  or just press [bold]Enter[/bold] to skip.\n"
+        "  You can always add them later in [bold].onemancompany/.env[/bold][/dim]\n"
+    )
+
+    from InquirerPy import inquirer as _inq
+
+    extras: dict[str, str] = {}
+
+    # Anthropic API Key
+    console.print(
+        "  [bold]Anthropic API Key[/bold]\n"
+        "  [dim]Needed for Claude Code execution mode. Skip to configure later.[/dim]"
+    )
+    key = _inq.secret(
+        message="Anthropic API Key (Enter to skip):",
+        style=INQ_STYLE,
+        default="",
+    ).execute()
+    if key.strip():
+        extras[ENV_KEY_ANTHROPIC] = key.strip()
+        console.print("  [bright_green]▸[/bright_green] Saved")
+    console.print()
+
+    # SkillMarket API Key
+    console.print(
+        "  [bold]SkillMarket API Key[/bold]\n"
+        "  [dim]Allows employees to search and install community skills from SkillMarket\n"
+        "  when they need new capabilities (web search, data analysis, coding tools, etc.).\n"
+        "  Register at[/dim] [link=https://skillsmp.com]skillsmp.com[/link]"
+    )
+    key = _inq.secret(
+        message="SkillMarket API Key (Enter to skip):",
+        style=INQ_STYLE,
+        default="",
+    ).execute()
+    if key.strip():
+        extras[ENV_KEY_SKILLSMP] = key.strip()
+        console.print("  [bright_green]▸[/bright_green] Saved")
+    console.print()
+
+    # Talent Market API Key
+    console.print(
+        "  [bold bright_yellow]★ Recommended[/bold bright_yellow]  [bold]Talent Market API Key[/bold]\n"
+        "  [dim]Lets HR hire AI employees from the marketplace.\n"
+        "  Without this, only 4 founding executives available.\n"
+        "  Register at[/dim] [link=https://one-man-company.com]one-man-company.com[/link]"
+    )
+    key = _inq.secret(
+        message="Talent Market API Key (Enter to skip):",
+        style=INQ_STYLE,
+        default="",
+    ).execute()
+    if key.strip():
+        extras[ENV_KEY_TALENT_MARKET] = key.strip()
+        console.print("  [bright_green]▸[/bright_green] Saved")
+        # AI Search Talent toggle (only when TM API key is provided)
+        console.print()
+        console.print(
+            "  [bold]AI-Powered Talent Search[/bold]\n"
+            "  [dim]Uses AI to match candidates to job descriptions.\n"
+            "  Improves candidate quality. Can be changed later in Settings.[/dim]"
+        )
+        use_ai = _inq.confirm(
+            message="Enable AI Search Talent?",
+            default=True,
+            style=INQ_STYLE,
+        ).execute()
+        extras["USE_AI_SEARCH"] = "true" if use_ai else "false"
+
+    return extras
+
+
+def _step_execute(
+    console: Console,
+    provider: str,
+    api_key: str,
+    model: str,
+    host: str,
+    port: int,
+    extras: dict[str, str],
+    sandbox_enabled: bool = False,
+    founder_families: dict[str, str] | None = None,
+    base_url: str = "",
+    custom_chat_class: str = "",
+) -> None:
+    console.print()
+    _print_step(console, 5, "GENESIS", "Company Initialization")
+    console.print(
+        "\n  [dim]Deploying company infrastructure and founding team...[/dim]\n"
+    )
+
+    # 1. Copy company/ template
+    src_company = SOURCE_ROOT / COMPANY_TEMPLATE_DIR
+    dst_company = DATA_ROOT / COMPANY_TEMPLATE_DIR
+    if src_company.exists() and not dst_company.exists():
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        with console.status("  Copying company template..."):
+            shutil.copytree(str(src_company), str(dst_company), symlinks=True)
+        console.print("  [green]\u2714[/green] Company template copied")
+    elif src_company.exists() and dst_company.exists():
+        # Merge missing files/dirs from template into existing directory
+        with console.status("  Checking company template completeness..."):
+            patched = False
+            for src_path in src_company.rglob("*"):
+                rel = src_path.relative_to(src_company)
+                dst_path = dst_company / rel
+                if src_path.is_dir():
+                    dst_path.mkdir(parents=True, exist_ok=True)
+                elif not dst_path.exists():
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src_path), str(dst_path))
+                    patched = True
+        if patched:
+            console.print("  [green]\u2714[/green] Missing template files restored")
+        else:
+            console.print("  [green]\u2714[/green] Company directory complete")
+    else:
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        console.print("  [yellow]\u26a0[/yellow] No source company/ template found")
+
+    # 2. Write .env
+    from onemancompany.core.config import PROVIDER_REGISTRY
+    prov_cfg = PROVIDER_REGISTRY.get(provider)
+    env_key_name = prov_cfg.env_key.upper() if prov_cfg else f"{provider.upper()}_API_KEY"
+
+    env_lines = [
+        "# Generated by onemancompany-init",
+        f"ONBOARDING_TIMESTAMP={datetime.now(timezone.utc).isoformat()}",
+        f"{ENV_KEY_DEFAULT_PROVIDER}={provider}",
+        f"{env_key_name}={api_key}",
+        f"{ENV_KEY_DEFAULT_MODEL}={model}",
+        f"{ENV_KEY_HOST}={host}",
+        f"{ENV_KEY_PORT}={port}",
+    ]
+    # Custom base URL (for non-default provider endpoints)
+    if base_url and prov_cfg and base_url != prov_cfg.base_url:
+        env_lines.append(f"DEFAULT_API_BASE_URL={base_url}")
+    # Custom provider chat class
+    if custom_chat_class:
+        env_lines.append(f"CUSTOM_CHAT_CLASS={custom_chat_class}")
+    # Also write base_url for OpenRouter (needed by existing code)
+    if provider == PROVIDER_OPENROUTER:
+        env_lines.append("OPENROUTER_BASE_URL=https://openrouter.ai/api/v1")
+    # Write auth method when Anthropic is the primary or extra provider
+    if provider == PROVIDER_ANTHROPIC:
+        env_lines.append(f"{ENV_KEY_ANTHROPIC_AUTH}={AuthMethod.API_KEY.value}")
+    if ENV_KEY_ANTHROPIC in extras:
+        env_lines.append(f"{ENV_KEY_ANTHROPIC}={extras[ENV_KEY_ANTHROPIC]}")
+        if provider != PROVIDER_ANTHROPIC:  # Don't duplicate if already written above
+            env_lines.append(f"{ENV_KEY_ANTHROPIC_AUTH}={AuthMethod.API_KEY.value}")
+    if ENV_KEY_SKILLSMP in extras:
+        env_lines.append(f"{ENV_KEY_SKILLSMP}={extras[ENV_KEY_SKILLSMP]}")
+
+    env_path = DATA_ROOT / DOT_ENV_FILENAME
+    write_text_utf(env_path, "\n".join(env_lines) + "\n")
+    console.print("  [green]\u2714[/green] .env written")
+
+    # 3. Copy config.yaml and inject Talent Market API key if provided
+    src_config = SOURCE_ROOT / CONFIG_YAML_FILENAME
+    dst_config = DATA_ROOT / CONFIG_YAML_FILENAME
+    if src_config.exists() and not dst_config.exists():
+        shutil.copy2(str(src_config), str(dst_config))
+        console.print("  [green]\u2714[/green] config.yaml copied")
+    # Patch config.yaml with user choices
+    if dst_config.exists():
+        import yaml
+        cfg = yaml.safe_load(read_text_utf(dst_config)) or {}
+        # Sandbox toggle
+        cfg.setdefault("tools", {}).setdefault("sandbox", {})["enabled"] = sandbox_enabled
+        # Talent Market API key + mode
+        tm_key = extras.get(ENV_KEY_TALENT_MARKET, "")
+        tm_cfg = cfg.setdefault("talent_market", {})
+        if tm_key:
+            tm_cfg["api_key"] = tm_key
+            tm_cfg["mode"] = "remote"  # API key provided → default to remote
+        else:
+            tm_cfg["mode"] = "local"   # No API key → local mode
+        # AI Search toggle
+        use_ai_val = extras.get("USE_AI_SEARCH", "")
+        if use_ai_val:
+            tm_cfg["use_ai_search"] = use_ai_val == "true"
+        write_text_utf(dst_config, yaml.dump(cfg, default_flow_style=False, allow_unicode=True))
+        if sandbox_enabled:
+            console.print("  [green]\u2714[/green] Sandbox tools enabled")
+        if tm_key:
+            console.print("  [green]\u2714[/green] Talent Market API key saved")
+
+    # 4. Sync founding employees' llm_model and api_provider to user-selected defaults
+    from onemancompany.core.config import sync_founding_defaults
+    _synced = sync_founding_defaults(provider=provider, model=model)
+    if _synced:
+        console.print(f"  [green]\u2714[/green] Founding employees set to {provider}/{model}")
+
+    # 5. Assign random default avatars to founding employees
+    _assign_default_avatars(console)
+
+    # 6. Generate MCP configs for founding employees
+    with console.status("  Generating MCP configs..."):
+        _generate_mcp_configs(extras.get(ENV_KEY_SKILLSMP, ""), host, port)
+    console.print("  [green]\u2714[/green] MCP configs generated for founding employees")
+
+    # 7. Apply agent family (hosting) assignments to founding employees
+    if founder_families:
+        _apply_founder_families(console, founder_families)
+
+
+def _apply_founder_families(console: Console, founder_families: dict[str, str]) -> None:
+    """Set hosting mode in profile.yaml and install openclaw launch.sh if needed."""
+    import subprocess
+    import yaml as _yaml
+
+    family_labels = HOSTING_LABELS
+    needs_openclaw = any(v == "openclaw" for v in founder_families.values())
+
+    # Install openclaw CLI if any founder uses it
+    if needs_openclaw:
+        with console.status("  [bright_cyan]Installing OpenClaw CLI...[/bright_cyan]"):
+            try:
+                result = subprocess.run(
+                    ["npm", "install", "-g", "openclaw@latest"],
+                    capture_output=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    console.print("  [bright_green]\u2714[/bright_green] OpenClaw CLI installed")
+                else:
+                    err = result.stderr.decode(errors="replace")[:200] if result.stderr else "unknown error"
+                    console.print(f"  [yellow]\u26a0[/yellow] OpenClaw CLI install failed: {err}")
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                console.print(f"  [yellow]\u26a0[/yellow] OpenClaw CLI install skipped: {e}")
+
+    # Apply per-founder hosting
+    changed = 0
+    for emp_id, hosting in founder_families.items():
+        profile_path = EMPLOYEES_DIR / emp_id / "profile.yaml"
+        if not profile_path.exists():
+            continue
+        data = _yaml.safe_load(read_text_utf(profile_path)) or {}
+        if data.get("hosting") != hosting:
+            data["hosting"] = hosting
+            write_text_utf(profile_path, _yaml.dump(data, default_flow_style=False, allow_unicode=True))
+            changed += 1
+
+    if changed:
+        from onemancompany.core.config import HR_ID, COO_ID, EA_ID, CSO_ID
+        _id_names = {EA_ID: "EA", HR_ID: "HR", COO_ID: "COO", CSO_ID: "CSO"}
+        summary = ", ".join(
+            f"{_id_names.get(eid, eid)}→{family_labels[h]}"
+            for eid, h in sorted(founder_families.items())
+        )
+        console.print(f"  [bright_green]\u2714[/bright_green] Vessels deployed: {summary}")
+
+
+def _assign_default_avatars(console: Console) -> None:
+    """Assign random avatars from avatars/ to founding employees that lack one."""
+    import random
+
+    avatars_dir = HR_DIR / "avatars"
+    if not avatars_dir.exists():
+        return
+
+    avatars = sorted(p for p in avatars_dir.iterdir() if p.suffix in (".png", ".jpg", ".jpeg"))
+    if not avatars:
+        return
+
+    from onemancompany.core.config import FOUNDING_IDS
+    exec_ids = sorted(FOUNDING_IDS)
+    pool = list(avatars)
+    random.shuffle(pool)
+
+    assigned = 0
+    for i, emp_id in enumerate(exec_ids):
+        emp_dir = EMPLOYEES_DIR / emp_id
+        if not emp_dir.exists():
+            continue
+        # Skip if already has a custom avatar
+        if any((emp_dir / f"avatar.{ext}").exists() for ext in ("png", "jpg", "jpeg")):
+            continue
+        pick = pool[i % len(pool)]
+        shutil.copy2(str(pick), str(emp_dir / f"avatar{pick.suffix}"))
+        assigned += 1
+
+    if assigned:
+        console.print(f"  [green]\u2714[/green] Default avatars assigned to {assigned} founding employees")
+    else:
+        console.print("  [green]\u2714[/green] Founding employees already have avatars")
+
+
+def _generate_mcp_configs(skillsmp_key: str, host: str, port: int) -> None:
+    """Generate mcp_config.json for founding employees."""
+    import sys
+
+    python_path = sys.executable
+    from onemancompany.core.config import EXEC_IDS
+    exec_ids = sorted(EXEC_IDS)
+    server_host = "localhost" if host == "0.0.0.0" else host
+    server_url = f"http://{server_host}:{port}"
+
+    for emp_id in exec_ids:
+        emp_dir = EMPLOYEES_DIR / emp_id
+        if not emp_dir.exists():
+            continue
+
+        servers: dict = {
+            "onemancompany": {
+                "command": python_path,
+                "args": ["-m", "onemancompany.tools.mcp.server"],
+                "env": {
+                    ENV_OMC_EMPLOYEE_ID: emp_id,
+                    ENV_OMC_TASK_ID: "",
+                    ENV_OMC_PROJECT_ID: "",
+                    ENV_OMC_PROJECT_DIR: "",
+                    ENV_OMC_SERVER_URL: server_url,
+                },
+            },
+        }
+
+        gmail_mcp = TOOLS_DIR / "gmail" / "mcp_server.py"
+        if gmail_mcp.exists():
+            servers["gmail"] = {
+                "command": python_path,
+                "args": [str(gmail_mcp)],
+            }
+
+        if skillsmp_key:
+            servers["fastskills"] = {
+                "command": "uvx",
+                "args": [
+                    "fastskills",
+                    "--skills-dir", str(emp_dir / "skills"),
+                    "--workdir", str(emp_dir / WORKSPACE_DIR_NAME),
+                ],
+                "env": {
+                    ENV_KEY_SKILLSMP: skillsmp_key,
+                },
+            }
+
+        config_path = emp_dir / MCP_CONFIG_FILENAME
+        write_text_utf(config_path, json.dumps({"mcpServers": servers}, indent=2))
+
+
+def _step_done(console: Console, host: str, port: int) -> None:
+    console.print()
+    url = f"http://{'localhost' if host == '0.0.0.0' else host}:{port}"
+    genesis_art = Text(
+        _pad_art(
+            "░▒▓  ██████╗ ███████╗███╗   ██╗███████╗\n"
+            "░▒▓ ██╔════╝ ██╔════╝████╗  ██║██╔════╝\n"
+            "░▒▓ ██║  ███╗█████╗  ██╔██╗ ██║█████╗\n"
+            "░▒▓ ██║   ██║██╔══╝  ██║╚██╗██║██╔══╝\n"
+            "░▒▓ ╚██████╔╝███████╗██║ ╚████║███████╗\n"
+            "░▒▓  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝\n"
+            "\n"
+            "░▒▓  G E N E S I S   C O M P L E T E"
+        ),
+        style="bold bright_green",
+    )
+    console.print(Panel(Align.center(genesis_art), border_style="bright_green", expand=True, padding=(1, 2)))
+    console.print(Panel(
+        "  [bright_cyan]Your company is online. Neural cores activated.[/bright_cyan]\n\n"
+        "  [bold]FOUNDING TEAM DEPLOYED:[/bold]\n"
+        "  [bright_green]  ▸[/bright_green] Pat EA       [dim]// Executive Assistant — task routing & quality gate[/dim]\n"
+        "  [bright_green]  ▸[/bright_green] Sam HR       [dim]// Human Resources — hiring & performance[/dim]\n"
+        "  [bright_green]  ▸[/bright_green] Alex COO     [dim]// Chief Operating Officer — operations & dispatch[/dim]\n"
+        "  [bright_green]  ▸[/bright_green] Morgan CSO   [dim]// Chief Sales Officer — sales & client relations[/dim]\n\n"
+        "  [bold]NEXT PROTOCOL:[/bold]\n"
+        f"  [bright_cyan]  01[/bright_cyan] Server boots automatically after this sequence\n"
+        f"  [bright_cyan]  02[/bright_cyan] Access your office → [link={url}][bold]{url}[/bold][/link]\n"
+        f"  [bright_cyan]  03[/bright_cyan] Issue your first directive to the team\n\n"
+        "  [dim]> Example: \"Build me a puzzle game for mobile\"[/dim]\n\n"
+        "  [dim]Need reinforcements? Configure Talent Market and tell HR to recruit.[/dim]",
+        border_style="bright_magenta",
+        padding=(1, 2),
+        expand=True,
+    ))
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def run_wizard() -> None:
+    """Run the onboarding wizard."""
+    console = Console()
+
+    _step_welcome(console)
+
+    # Check existing installation
+    if DATA_ROOT.exists():
+        console.print(
+            f"[yellow]\u26a0[/yellow]  [bold].onemancompany/[/bold] already exists at\n"
+            f"   {DATA_ROOT}\n"
+        )
+        from InquirerPy import inquirer as _inq
+        if not _inq.confirm(
+            message="Reconfigure?",
+            default=False,
+            style=INQ_STYLE,
+        ).execute():
+            console.print("\n  Aborted. Existing configuration unchanged.")
+            return
+
+    founder_families = _step_agent_family(console)      # Step 1: Agent Family
+    provider, api_key, model, base_url, custom_chat_class = _step_llm(console)  # Step 2: LLM Provider & Key
+    extras = _step_optional(console)                     # Step 3: External Integrations
+    host, port = _step_server(console)                   # Step 4: Server
+    _step_execute(console, provider, api_key, model, host, port, extras,
+                  founder_families=founder_families,
+                  base_url=base_url, custom_chat_class=custom_chat_class)
+    _step_done(console, host, port)
+
+
+def run_auto(*, skip_confirm: bool = False) -> None:
+    """Non-interactive init that reads config from .env file."""
+    import os
+
+    console = Console()
+    console.rule("[bold]OneManCompany Auto Init[/bold]")
+
+    # Find .env — check CWD first, then project root
+    env_path = Path.cwd() / DOT_ENV_FILENAME
+    if not env_path.exists():
+        env_path = SOURCE_ROOT / DOT_ENV_FILENAME
+    if not env_path.exists():
+        console.print("[red]  ✗ No .env file found. Run onemancompany-init interactively first.[/red]")
+        raise SystemExit(1)
+
+    # Parse .env
+    env = {}
+    for line in read_text_utf(env_path).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip()
+
+    # Determine provider from env keys
+    if env.get(ENV_KEY_OPENROUTER):
+        provider = PROVIDER_OPENROUTER
+        api_key = env[ENV_KEY_OPENROUTER]
+    elif env.get(ENV_KEY_ANTHROPIC):
+        provider = PROVIDER_ANTHROPIC
+        api_key = env[ENV_KEY_ANTHROPIC]
+    else:
+        # Try to detect from DEFAULT_API_PROVIDER
+        provider = env.get(ENV_KEY_DEFAULT_PROVIDER, PROVIDER_OPENROUTER)
+        api_key = env.get(f"{provider.upper()}_API_KEY", "")
+
+    model = env.get(ENV_KEY_DEFAULT_MODEL, "anthropic/claude-sonnet-4")
+    host = env.get(ENV_KEY_HOST, "0.0.0.0")
+    port = int(env.get(ENV_KEY_PORT, "8000"))
+
+    # Preserve custom/Azure endpoint config from the source .env — otherwise the
+    # regenerated .env drops these and the setup silently falls back to defaults.
+    base_url = env.get(ENV_KEY_DEFAULT_BASE_URL, "")
+    custom_chat_class = env.get(ENV_KEY_CUSTOM_CHAT_CLASS, "")
+
+    extras: dict[str, str] = {}
+    if env.get(ENV_KEY_ANTHROPIC):
+        extras[ENV_KEY_ANTHROPIC] = env[ENV_KEY_ANTHROPIC]
+    if env.get(ENV_KEY_SKILLSMP):
+        extras[ENV_KEY_SKILLSMP] = env[ENV_KEY_SKILLSMP]
+    if env.get(ENV_KEY_TALENT_MARKET):
+        extras[ENV_KEY_TALENT_MARKET] = env[ENV_KEY_TALENT_MARKET]
+
+    sandbox_enabled = env.get(ENV_KEY_SANDBOX_ENABLED, "").lower() in ("1", "true", "yes")
+
+    masked = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "****"
+    console.print(f"  Provider: [cyan]{provider}[/cyan]")
+    console.print(f"  API Key:  [cyan]{masked}[/cyan]")
+    console.print(f"  Model:    [cyan]{model}[/cyan]")
+    console.print(f"  Server:   [cyan]{host}:{port}[/cyan]")
+    console.print()
+
+    if not skip_confirm:
+        from InquirerPy import inquirer as _inq
+        if not _inq.confirm(
+            message="Proceed with auto-init?",
+            default=False,
+            style=INQ_STYLE,
+        ).execute():
+            console.print("\n  Aborted.")
+            return
+
+    _step_execute(console, provider, api_key, model, host, port, extras,
+                  sandbox_enabled=sandbox_enabled, base_url=base_url,
+                  custom_chat_class=custom_chat_class)
+    _step_done(console, host, port)
+
+
+def main() -> None:
+    """CLI entry point for onemancompany-init."""
+    import sys
+
+    try:
+        if "--auto" in sys.argv:
+            run_auto(skip_confirm=("-y" in sys.argv or "--yes" in sys.argv))
+        else:
+            run_wizard()
+    except KeyboardInterrupt:
+        console = Console()
+        console.print("\n\n  [yellow]Cancelled.[/yellow]")
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

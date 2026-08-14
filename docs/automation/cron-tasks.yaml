@@ -1,0 +1,424 @@
+# OneManCompany 自动化任务配置
+# 24小时不间断工作模式
+# Schema Version: 1.0
+
+schema_version: 1
+
+cron_tasks:
+  # ========================================
+  # COO 自动调度任务
+  # ========================================
+
+  - id: coo-auto-schedule
+    name: "COO自动任务调度"
+    employee_id: "00003"
+    schedule: "7 */2 * * *"  # 每2小时的第7分钟
+    task_key_template: "system:coo-schedule:{scheduled_at}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      执行自动任务调度：
+
+      1. 扫描任务队列（backlog）
+      2. 检查所有员工状态
+      3. 识别空闲员工（idle > 10分钟）
+      4. 识别阻塞任务（无进展 > 2小时）
+      5. 根据当前时段策略分配任务
+      6. 更新任务优先级
+      7. 记录调度决策
+
+      当前时间：{now}
+      时段策略：{time_strategy}
+
+  - id: coo-blocking-check
+    name: "COO阻塞检查"
+    employee_id: "00003"
+    schedule: "17 * * * *"  # 每小时的第17分钟
+    task_key_template: "system:coo-blocking-check:{scheduled_at}"
+    enabled: true
+    priority: 2
+    prompt_template: |
+      检查项目阻塞情况：
+
+      1. 识别阻塞任务（无进展 > 2小时）
+      2. 分析阻塞原因
+      3. 制定解决方案
+      4. 如果需要Tech Lead，上报
+      5. 如果需要CEO决策，上报
+      6. 更新阻塞任务状态
+
+      重点检查：
+      - 依赖未完成
+      - 技术难题
+      - 需要人工决策
+      - 环境问题
+      - 资源不足
+
+  # ========================================
+  # 每日报告任务
+  # ========================================
+
+  - id: coo-morning-report
+    name: "COO生成早间报告"
+    employee_id: "00003"
+    schedule: "30 8 * * *"
+    task_key_template: "system:morning-report:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      生成早间报告（夜间工作总结）：
+
+      报告时段：昨晚21:00 - 今早08:00
+
+      必须包含：
+      1. 🌙 夜间完成任务列表
+      2. 🧪 测试结果（回归、性能、兼容性）
+      3. ⚠️ 遇到的问题和解决方案
+      4. 🚧 阻塞任务和建议处理
+      5. 📋 今日计划（优先级排序）
+      6. 📈 里程碑进度
+
+      格式：Markdown
+      保存路径：reports/daily/morning_briefing_{date}.md
+
+      完成后通知EA（00004）整理成简报。
+
+  - id: ea-morning-brief
+    name: "EA生成早间简报"
+    employee_id: "00004"
+    schedule: "35 8 * * *"
+    task_key_template: "system:morning-brief:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      整理COO早间报告为1页简报：
+
+      读取：reports/daily/morning_briefing_{date}.md
+
+      简报结构：
+      1. ⚡ 需要立即决策（最多3项，突出显示）
+      2. 🌙 夜间亮点（3-5条）
+      3. ⚠️ 关键问题（最多3个）
+      4. 📋 今日TOP3优先级
+      5. 📈 项目进度（1行）
+
+      要求：
+      - 总长度不超过1页
+      - 突出需要CEO关注的内容
+      - 使用简洁明了的语言
+
+      保存路径：reports/daily/morning_brief_{date}.md
+
+  - id: coo-evening-report
+    name: "COO生成晚间报告"
+    employee_id: "00003"
+    schedule: "0 21 * * *"
+    task_key_template: "system:evening-report:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      生成晚间报告（日间工作总结）：
+
+      报告时段：今日09:00 - 21:00
+
+      必须包含：
+      1. ☀️ 今日成果（完成任务、代码提交、测试）
+      2. 👥 团队工作情况
+      3. 🌙 夜间任务计划（已分配的任务）
+      4. ⚠️ 需要CEO睡前决策的事项
+      5. 📈 Sprint进度更新
+      6. 💡 明早期望（预计完成的任务）
+
+      格式：Markdown
+      保存路径：reports/daily/evening_briefing_{date}.md
+
+  # ========================================
+  # 夜间自动化测试
+  # ========================================
+
+  - id: nightly-regression-test
+    name: "夜间回归测试"
+    employee_id: "00012"
+    schedule: "0 0 * * *"
+    task_key_template: "system:regression-test:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      运行完整回归测试套件：
+
+      测试范围：
+      1. API测试（Pytest）
+         - 所有端点功能测试
+         - 认证授权测试
+         - 错误处理测试
+
+      2. UI测试（Playwright）
+         - 关键用户流程
+         - 跨浏览器测试（Chrome、Firefox）
+
+      3. 集成测试
+         - 端到端场景
+
+      要求：
+      - 生成HTML测试报告
+      - 失败用例截图
+      - 覆盖率报告
+      - 预计完成时间：02:00前
+
+      保存路径：reports/tests/regression_{date}.html
+
+  - id: nightly-performance-test
+    name: "夜间性能测试"
+    employee_id: "00012"
+    schedule: "0 2 * * *"
+    task_key_template: "system:performance-test:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      运行性能和压力测试：
+
+      测试内容：
+      1. API性能测试（Locust）
+         - 并发用户：100
+         - 持续时间：1小时
+         - 监控指标：响应时间、吞吐量、错误率
+
+      2. 数据库性能
+         - 慢查询分析
+         - 连接池监控
+
+      3. 资源使用
+         - CPU、内存、磁盘IO
+
+      基线对比：
+      - 响应时间：P95 < 200ms
+      - 吞吐量：> 1000 req/s
+      - 错误率：< 1%
+
+      保存路径：reports/tests/performance_{date}.html
+
+  - id: nightly-device-compatibility-test
+    name: "夜间设备兼容性测试"
+    employee_id: "00012"
+    schedule: "0 4 * * *"
+    task_key_template: "system:device-compatibility-test:{date}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      运行8设备兼容性测试：
+
+      测试设备（ADB）：
+      1. HONOR Mate X5
+      2. Xiaomi 14
+      3. OPPO Find X7
+      4. vivo X100
+      5. Samsung S24
+      6. Huawei P60
+      7. Redmi K70
+      8. realme GT5
+
+      测试项：
+      - 设备连接（100%通过）
+      - 设备注册（100%通过）
+      - APK安装（≥95%成功率）
+      - 截图功能（100%通过）
+      - 日志采集（≥90%成功率）
+
+      要求：
+      - 每个设备单独报告
+      - 失败设备详细日志
+      - 统计汇总表
+
+      保存路径：reports/tests/device_compatibility_{date}.html
+
+  # ========================================
+  # 系统维护任务
+  # ========================================
+
+  - id: database-backup
+    name: "数据库自动备份"
+    employee_id: "00008"
+    schedule: "0 2 * * *"
+    task_key_template: "system:db-backup:{date}"
+    enabled: true
+    priority: 2
+    prompt_template: |
+      执行数据库备份：
+
+      备份内容：
+      1. SQLite数据库（runtime.sqlite3）
+         - 使用在线backup API
+         - 不直接复制文件
+
+      2. 项目数据
+         - TaskTree YAML
+         - 员工配置
+         - 项目配置
+
+      备份路径：backups/db/backup_{date}_{time}/
+
+      保留策略：
+      - 最近7天：每日备份
+      - 最近4周：每周备份
+      - 最近6个月：每月备份
+
+      验证：
+      - 备份文件完整性检查
+      - 备份大小合理性检查
+
+      完成后记录到：backups/db/backup_log.txt
+
+  - id: log-cleanup
+    name: "日志自动清理"
+    employee_id: "00008"
+    schedule: "23 * * * *"
+    task_key_template: "system:log-cleanup:{datetime}"
+    enabled: true
+    priority: 3
+    prompt_template: |
+      清理过期日志文件：
+
+      清理规则：
+      1. 应用日志（.onemancompany/logs/）
+         - 保留最近7天
+         - 压缩7-30天前的日志
+         - 删除30天前的日志
+
+      2. 员工日志（employees/*/progress.log）
+         - 保留最近30天
+
+      3. 测试日志（reports/tests/）
+         - 保留最近14天
+
+      清理步骤：
+      1. 查找过期文件
+      2. 压缩可压缩文件
+      3. 删除过期文件
+      4. 记录清理结果
+
+      预期释放空间：> 100MB
+
+  - id: health-check
+    name: "系统健康检查"
+    employee_id: "00008"
+    schedule: "13 */4 * * *"
+    task_key_template: "system:health-check:{datetime}"
+    enabled: true
+    priority: 1
+    prompt_template: |
+      执行系统健康检查：
+
+      检查项：
+      1. 服务状态
+         - API服务（http://localhost:8000/health）
+         - 数据库连接
+         - Redis连接（如果使用）
+
+      2. 资源使用
+         - CPU使用率 < 80%
+         - 内存使用率 < 85%
+         - 磁盘使用率 < 90%
+
+      3. 设备状态
+         - 8台设备在线数 >= 6
+         - ADB连接正常
+
+      4. 日志错误
+         - 最近1小时无P0错误
+         - 最近4小时P1错误 < 5个
+
+      告警条件：
+      - 任何检查项失败 → 立即通知COO
+      - 2次连续失败 → 通知CEO
+
+      保存路径：reports/health/health_check_{datetime}.json
+
+  - id: ssl-cert-check
+    name: "SSL证书检查和更新"
+    employee_id: "00008"
+    schedule: "0 4 * * *"
+    task_key_template: "system:ssl-check:{date}"
+    enabled: true
+    priority: 2
+    prompt_template: |
+      检查SSL证书状态：
+
+      检查域名：
+      - cloud-test.example.com
+      - api.cloud-test.example.com
+
+      检查项：
+      1. 证书过期时间
+      2. 证书有效性
+      3. 证书链完整性
+
+      更新条件：
+      - 剩余有效期 < 30天 → 自动更新
+      - 剩余有效期 < 7天 → 紧急通知CEO
+
+      更新步骤（Let's Encrypt）：
+      1. certbot renew
+      2. 重载Nginx
+      3. 验证新证书
+
+      记录到：reports/ssl/ssl_check_{date}.log
+
+  # ========================================
+  # 代码质量任务
+  # ========================================
+
+  - id: code-quality-analysis
+    name: "代码质量分析"
+    employee_id: "00006"
+    schedule: "0 3 * * *"
+    task_key_template: "system:code-quality:{date}"
+    enabled: true
+    priority: 2
+    prompt_template: |
+      运行代码质量分析：
+
+      分析工具：
+      1. Pylint（Python）
+         - 代码风格检查
+         - 潜在bug检测
+         - 复杂度分析
+
+      2. Coverage（测试覆盖率）
+         - 单元测试覆盖率
+         - 集成测试覆盖率
+         - 覆盖率趋势
+
+      3. 代码复杂度
+         - 圈复杂度
+         - 认知复杂度
+         - 函数长度
+
+      基线标准：
+      - Pylint评分 > 8.0
+      - 测试覆盖率 > 60%
+      - 圈复杂度 < 10
+
+      输出：
+      - HTML报告
+      - 趋势图表
+      - 改进建议
+
+      保存路径：reports/quality/code_quality_{date}.html
+
+# ========================================
+# 变量说明
+# ========================================
+#
+# prompt_template 中可用的变量：
+# - {now}: 当前时间戳
+# - {date}: 当前日期 YYYY-MM-DD
+# - {time}: 当前时间 HH:MM:SS
+# - {datetime}: 完整时间戳
+# - {scheduled_at}: 计划执行时间
+# - {time_strategy}: 时段策略（激进/保守）
+#
+# task_key_template 用于生成幂等的 task_key
+# - 必须包含时间相关变量以确保唯一性
+# - 同一 task_key 不会重复创建任务
+#
+# ========================================

@@ -1,0 +1,251 @@
+{
+  "generated_at": "2026-08-14T04:35:53.358132+00:00",
+  "gate": "standard_v2_p0",
+  "status": "passed",
+  "formal_24h_launch_allowed": false,
+  "launch_note": "P0 and isolated recovery gates passed; real cloud-provider, real-service restart, embedding, device-smoke, and 24-hour wall-clock drills remain required.",
+  "results": [
+    {
+      "name": "sqlite_langgraph_import_contract",
+      "status": "passed",
+      "detail": {
+        "AsyncSqliteSaver": "langgraph.checkpoint.sqlite.aio.AsyncSqliteSaver",
+        "AsyncSqliteStore": "langgraph.store.sqlite.aio.AsyncSqliteStore"
+      }
+    },
+    {
+      "name": "formal_employee_configuration",
+      "status": "passed",
+      "detail": {
+        "formal_profiles": [
+          "00001",
+          "00002",
+          "00003",
+          "00004",
+          "00005",
+          "00006",
+          "00007",
+          "00008",
+          "00009",
+          "00010",
+          "00011",
+          "00012"
+        ],
+        "aligned": {
+          "00003": {
+            "role": "COO",
+            "model": "claude-opus-5"
+          },
+          "00006": {
+            "role": "Senior Backend Engineer",
+            "model": "claude-opus-5"
+          },
+          "00007": {
+            "role": "Full-Stack Engineer",
+            "model": "claude-sonnet-5"
+          },
+          "00008": {
+            "role": "DevOps/SRE Engineer",
+            "model": "gpt-5.6-sol"
+          },
+          "00009": {
+            "role": "QA Lead",
+            "model": "claude-sonnet-5"
+          },
+          "00010": {
+            "role": "Tech Lead",
+            "model": "claude-fable-5"
+          },
+          "00011": {
+            "role": "Mid-level Backend Engineer",
+            "model": "gpt-5.6-sol"
+          },
+          "00012": {
+            "role": "Automation Test Engineer",
+            "model": "gpt-5.6-sol"
+          }
+        }
+      }
+    },
+    {
+      "name": "atomic_work_principles",
+      "status": "passed",
+      "detail": {
+        "revision": "24h-v2-20260813T160434Z",
+        "employees": [
+          "00002",
+          "00003",
+          "00004",
+          "00005",
+          "00006",
+          "00007",
+          "00008",
+          "00009",
+          "00010",
+          "00011",
+          "00012"
+        ]
+      }
+    },
+    {
+      "name": "automation_manifest",
+      "status": "passed",
+      "detail": {
+        "count": 13,
+        "ids": [
+          "coo-auto-schedule",
+          "coo-blocking-check",
+          "coo-morning-report",
+          "ea-morning-brief",
+          "coo-evening-report",
+          "nightly-regression-test",
+          "nightly-performance-test",
+          "nightly-device-compatibility-test",
+          "database-backup",
+          "log-cleanup",
+          "health-check",
+          "ssl-cert-check",
+          "code-quality-analysis"
+        ]
+      }
+    },
+    {
+      "name": "operational_scripts",
+      "status": "passed",
+      "detail": {
+        "scripts": [
+          "docs/automation/backup-scripts/backup-all.sh",
+          "docs/automation/backup-scripts/restore.sh",
+          "scripts/check-system-ready.sh",
+          "scripts/monitor-24h-mode.sh",
+          "scripts/verify-24h-mode.sh"
+        ]
+      }
+    },
+    {
+      "name": "runtime_checkpoint_provider",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/core/test_execution_runtime.py",
+        "tests/unit/core/test_provider_gateway.py",
+        "tests/unit/core/test_runtime_storage.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "25 passed in 1.03s",
+      "output_tail": [
+        ".........................                                                [100%]",
+        "25 passed in 1.03s"
+      ]
+    },
+    {
+      "name": "dispatch_receipts_and_idempotency",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/agents/test_dispatch_idempotency.py",
+        "tests/integration/test_dispatch_assignment_flow.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "4 passed in 0.97s",
+      "output_tail": [
+        "....                                                                     [100%]",
+        "4 passed in 0.97s"
+      ]
+    },
+    {
+      "name": "explicit_acceptance_and_closure",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/agents/test_explicit_acceptance_v2.py",
+        "tests/unit/core/test_standard_v2_review_omission.py",
+        "tests/integration/test_formal_dispatch_checker.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "10 passed in 0.58s",
+      "output_tail": [
+        "..........                                                               [100%]",
+        "10 passed in 0.58s"
+      ]
+    },
+    {
+      "name": "memory_authority_and_secret_boundaries",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/core/test_memory_service.py",
+        "tests/unit/core/test_memory_policy_additions.py",
+        "tests/unit/api/test_memory_admin_api.py",
+        "tests/unit/agents/test_checkpoint_secret_filter.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "21 passed in 1.34s",
+      "output_tail": [
+        ".....................                                                    [100%]",
+        "21 passed in 1.34s"
+      ]
+    },
+    {
+      "name": "automation_registration_contract",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/unit/core/test_automation_manifest.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "5 passed in 0.79s",
+      "output_tail": [
+        ".....                                                                    [100%]",
+        "5 passed in 0.79s"
+      ]
+    },
+    {
+      "name": "isolated_recovery_crash_resume_and_reconciliation",
+      "status": "passed",
+      "command": [
+        "/Users/hanzhen/Downloads/OneManCompany-main/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/test_checkpoint_crash_resume.py",
+        "tests/integration/test_provider_holding_resume.py",
+        "tests/integration/test_checkpoint_reconciler.py",
+        "tests/unit/core/test_checkpoint_reconciler.py",
+        "--timeout=30"
+      ],
+      "returncode": 0,
+      "summary": "4 passed in 1.95s",
+      "output_tail": [
+        "....                                                                     [100%]",
+        "4 passed in 1.95s"
+      ]
+    },
+    {
+      "name": "iter_009_read_only_protection",
+      "status": "passed",
+      "before": "fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251",
+      "after": "fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251"
+    }
+  ]
+}

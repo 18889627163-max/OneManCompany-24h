@@ -1,0 +1,80 @@
+[project]
+name = "onemancompany"
+version = "0.7.110"
+description = "A one-man company simulation with pixel art visualization and LangChain AI agents"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "websockets>=13",
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+    "langgraph>=0.3",
+    "langgraph-checkpoint-sqlite>=3.1,<4",
+    "sqlite-vec==0.1.9",
+    "aiosqlite>=0.20",
+    "langchain-openai>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-mcp-adapters>=0.1",
+    "mcp>=1.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0.3",
+    "httpx>=0.27",
+    "watchdog>=4.0",
+    "loguru>=0.7",
+    "rich>=13.0",
+    "InquirerPy>=0.3",
+    "datasets>=4.8.3",
+    "ddgs>=8.0",
+    # Pinned exactly: 0.10+ renamed/removed SetSessionModelRequest (see acp/adapter.py).
+    "agent-client-protocol==0.9.0",
+]
+
+[project.optional-dependencies]
+sandbox = [
+    "opensandbox>=0.1",
+    "opensandbox-code-interpreter>=0.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/onemancompany"]
+
+[project.scripts]
+onemancompany = "onemancompany.main:run"
+onemancompany-init = "onemancompany.onboard:main"
+onemancompany-admin = "onemancompany.admin_cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external deps, <1s)",
+    "integration: Integration tests (mock LLM, <30s)",
+    "e2e: End-to-end tests (need running server, <120s)",
+]
+asyncio_mode = "auto"
+timeout = 30
+filterwarnings = [
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+    "python-semantic-release>=9",
+]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+changelog_file = "CHANGELOG.md"
+build_command = ""
+commit_message = "chore(release): {version}"

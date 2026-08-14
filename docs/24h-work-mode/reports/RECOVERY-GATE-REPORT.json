@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-08-14T04:37:34.964766+00:00",
+  "gate": "standard_v2_recovery",
+  "status": "passed",
+  "scope": "isolated_subprocess_fault_injection",
+  "formal_24h_launch_allowed": false,
+  "launch_note": "Isolated crash/resume, side-effect replay protection, simulated Provider 429 holding/resume, and checkpoint reconciliation passed. Real cloud-provider, real-service restart, embedding/vector, 24-hour wall-clock, device smoke, and a new formal standard-v2 iteration remain required.",
+  "environment": {
+    "data_root": "pytest tmp_path / isolated OMC_DATA_ROOT",
+    "formal_tasktree_loaded": false,
+    "real_cloud_provider_called": false,
+    "process_exit_codes": {
+      "checkpoint_crash": 87,
+      "provider_holding_crash": 88
+    }
+  },
+  "results": [
+    {
+      "name": "checkpoint_crash_resume",
+      "status": "passed",
+      "thread_id": "omc:recovery-project:iter_001:recovery-node:g1",
+      "crash": {
+        "checkpoint": true,
+        "ledger_status": "completed",
+        "side_effect_count": 1,
+        "finalize_count": 0
+      },
+      "resume": {
+        "human_messages": 1,
+        "side_effect_count": 1,
+        "finalize_count": 1,
+        "input": null
+      }
+    },
+    {
+      "name": "provider_429_holding_resume",
+      "status": "passed",
+      "request_id": "provider-recovery-1",
+      "provider_mode": "simulated_callable",
+      "holding": {
+        "status": "holding",
+        "attempt": 1,
+        "next_retry_at_present": true
+      },
+      "resume": {
+        "status": "completed",
+        "attempt": 1,
+        "next_retry_at": null,
+        "successful_callable_count": 1
+      }
+    },
+    {
+      "name": "tasktree_checkpoint_reconciliation",
+      "status": "passed",
+      "matrix": {
+        "resumable": 1,
+        "missing": 1,
+        "conflicts": 1,
+        "orphans": 1
+      },
+      "second_pass_new_records": 0
+    },
+    {
+      "name": "full_test_suite",
+      "status": "passed",
+      "summary": "4662 passed, 5 skipped, 73 warnings in 137.13s"
+    },
+    {
+      "name": "p0_gate",
+      "status": "passed",
+      "report": "docs/24h-work-mode/reports/P0-GATE-REPORT.json",
+      "recovery_group_summary": "4 passed in 1.95s"
+    },
+    {
+      "name": "iter_009_read_only_protection",
+      "status": "passed",
+      "sha256_tree": "fd2b06f7e0525010f5c38ccd122df655436f8722cca285b2b6698d9673dae251"
+    }
+  ],
+  "reports": [
+    "docs/24h-work-mode/reports/CHECKPOINT-CRASH-RESUME-20260814.md",
+    "docs/24h-work-mode/reports/PROVIDER-HOLDING-RESUME-20260814.md",
+    "docs/24h-work-mode/reports/CHECKPOINT-RECONCILIATION-20260814.md"
+  ],
+  "remaining_blockers": [
+    "real cloud embedding and sqlite-vec mixed retrieval/reindex drill",
+    "controlled real cloud Provider 429 and priority competition drill",
+    "real backend service restart against a new dedicated standard-v2 drill iteration",
+    "independent restore and read-only reconciliation of business receipts/audits",
+    "24-hour wall-clock fault-injection run",
+    "real device smoke and FFmpeg/FFprobe evidence",
+    "new formal standard-v2 four-person verification with explicit acceptance"
+  ]
+}
