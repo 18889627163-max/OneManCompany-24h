@@ -1366,7 +1366,7 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 
 ### 下一组 P1：真实长期记忆与 Provider Gate
 
-1. 配置受控云 embedding，在全新临时 `OMC_DATA_ROOT` 执行 endpoint/model/dimension 探针；
+1. 配置受控云 embedding，在全新临时 `OMC_DATA_ROOT` 执行 endpoint/model/dimension 探针；当前 Gate 工具和隔离测试已完成，但现有聊天服务候选 `/embeddings` 于 2026-08-14 返回 HTTP 503，等待独立可用 embedding 配置后重跑；
 2. 使用真实云返回验证 namespace/status 先过滤、向量检索、去重重排和 prompt budget；
 3. 验证真实 embedding 故障下的 pending 补向量和 memory worker Provider 让位；
 4. 经审批后才允许在正式 Runtime SQLite 注册目标 index version；正式 26 条 outbox 不得直接消费；

@@ -1,0 +1,18 @@
+{
+  "gate": "real_cloud_embedding_isolated",
+  "started_at": "2026-08-14T18:07:38.542046+00:00",
+  "formal_data_root": "/Users/hanzhen/Downloads/OneManCompany-main/.onemancompany",
+  "formal_outbox_touched": false,
+  "formal_launch_allowed": false,
+  "configuration": {
+    "provider_fingerprint": "9c215f0b555c6c9374b3235018713683596fd8fe55037e92e4a97e62854b9bb7",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "index_version": "candidate-v1"
+  },
+  "isolated_data_root": "/private/var/folders/dy/kgsk8ztj1nsdd8crjsh2gw3w0000gn/T/omc-real-embedding-gate-vug0k9mj",
+  "status": "failed",
+  "error_type": "RuntimeError",
+  "error": "embedding endpoint probe failed: InternalServerError status_code=503",
+  "completed_at": "2026-08-14T18:07:40.608386+00:00"
+}

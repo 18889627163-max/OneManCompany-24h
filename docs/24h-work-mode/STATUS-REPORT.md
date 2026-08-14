@@ -1,7 +1,7 @@
 # 24 小时工作模式实施状态报告
 
 **检查日期**：2026-08-14  
-**报告版本**：4.7
+**报告版本**：4.8
 **整体状态**：🟡 实施中，尚未正式上线
 
 > 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0 与隔离 Recovery Gate 通过，不等于真实云 Provider、正式业务服务重启、24 小时墙钟和最终 standard v2 iteration 已通过。
@@ -63,7 +63,7 @@
 - ⏳ 在真实 dispatch、executor started 和正式业务 side-effect 阶段分别注入故障并完成 receipt 对账。
 - ⏳ 使用受控真实云 Provider 验证 HTTP 429、长 backoff、优先级竞争和恢复 UI；当前 Provider 演练为隔离模拟。
 - ⏳ memory worker 与正式 Agent 的真实 Provider 并发槽位让位验证。
-- ⏳ 受控真实云 embedding 的 endpoint/model/dimension 探针、真实返回向量检索、正式 worker pending/backoff 和 Provider 让位；隔离 sqlite-vec/reindex Gate 已通过。
+- ❌ 受控真实云 embedding Gate 尚未通过：已新增 fail-closed 隔离 Gate 和测试，现有聊天服务候选 `/embeddings` 探针返回 HTTP 503；必须提供独立可用的 endpoint/model/dimension 后重跑。正式 worker pending/backoff 和 Provider 让位仍待验证。
 - ⏳ 独立恢复后针对真实业务 checkpoint/TaskTree/dispatch receipt/acceptance audit 的只读对账。
 - ⏳ 完整 24 小时墙钟运行、真机 smoke、FFmpeg/FFprobe 证据。
 - ⏳ 创建全新 standard v2 iteration，完成四人正式复验和显式验收。
@@ -237,7 +237,7 @@ PASS=35 FAIL=0 WARN=0
 
 1. **已完成：** 只读对账正式 RuntimeStorage。7 条 finding 均为旧 `_sys_automation_*` adhoc thread 假 orphan，正式 actionable conflict 为 0；outbox 当前为 26 条 pending、attempt=0，其中普通任务 15 条、system automation 11 条。没有删除、消费、重放或修改 `iter_009`。详见 `reports/RUNTIME-STATE-RECONCILIATION-20260814.md`。
 2. **隔离 Gate 已完成：** sqlite-vec `v0.1.9`、混合检索、versioned shadow reindex、原子切换、失败结构化降级和测试正式库隔离通过；详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。
-3. 配置受控云 embedding，在全新临时 `OMC_DATA_ROOT` 完成 endpoint/model/dimension 探针和真实返回检索；未经审批不消费正式 26 条 outbox。
+3. **进行中但阻塞：** 真实云 embedding 隔离 Gate 工具和防误触测试已完成；现有聊天服务候选 `/embeddings` 返回 HTTP 503。提供独立可用的 endpoint/model/dimension 后在全新临时 `OMC_DATA_ROOT` 重跑；未经审批不消费正式 26 条 outbox。详见 `reports/REAL-EMBEDDING-GATE-20260814.md`。
 4. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、backoff、优先级和恢复 UI。
 5. 创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
 6. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
