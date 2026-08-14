@@ -1,7 +1,7 @@
 # 24 小时工作模式实施状态报告
 
 **检查日期**：2026-08-14  
-**报告版本**：4.8
+**报告版本**：4.9
 **整体状态**：🟡 实施中，尚未正式上线
 
 > 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0 与隔离 Recovery Gate 通过，不等于真实云 Provider、正式业务服务重启、24 小时墙钟和最终 standard v2 iteration 已通过。
@@ -63,7 +63,7 @@
 - ⏳ 在真实 dispatch、executor started 和正式业务 side-effect 阶段分别注入故障并完成 receipt 对账。
 - ⏳ 使用受控真实云 Provider 验证 HTTP 429、长 backoff、优先级竞争和恢复 UI；当前 Provider 演练为隔离模拟。
 - ⏳ memory worker 与正式 Agent 的真实 Provider 并发槽位让位验证。
-- ❌ 受控真实云 embedding Gate 尚未通过：已新增 fail-closed 隔离 Gate 和测试，现有聊天服务候选 `/embeddings` 探针返回 HTTP 503；必须提供独立可用的 endpoint/model/dimension 后重跑。正式 worker pending/backoff 和 Provider 让位仍待验证。
+- ✅ 真实 Embedding Provider 隔离 Gate 已通过：本地 Ollama `0.32.12` + `embeddinggemma` 返回 768 维向量；真实写入/语义检索、ACL、candidate/status、去重、metadata 和 Prompt 预算全部通过。正式 worker pending/backoff 和 Provider 让位仍待验证。
 - ⏳ 独立恢复后针对真实业务 checkpoint/TaskTree/dispatch receipt/acceptance audit 的只读对账。
 - ⏳ 完整 24 小时墙钟运行、真机 smoke、FFmpeg/FFprobe 证据。
 - ⏳ 创建全新 standard v2 iteration，完成四人正式复验和显式验收。
@@ -90,9 +90,9 @@
 | MCP/SSE 生命周期 | ✅ 本地回归通过 | owner task 统一 enter/use/exit；真实远端断线演练待完成 |
 | 真实云 Provider Gate | 🟡 待演练 | 尚未发起真实云 429/并发限制故障注入 |
 | 真实业务服务重启 Gate | 🟡 待演练 | 尚未针对新专用正式演练 iteration 执行 |
-| memory ACL/可信度 | ✅ 代码与测试通过 | 真实云成员检索和 prompt budget 演练仍待完成 |
+| memory ACL/可信度 | ✅ 真实模型 Gate 通过 | employee/project ACL、candidate/status 和 Prompt budget 已用本地 Ollama 实测 |
 | sqlite-vec/reindex | ✅ 隔离 Gate 通过 | `v0.1.9`、混合检索、shadow rebuild、原子切换和失败降级已验证 |
-| 真实云 embedding | 🟡 配置阻塞 | 环境变量未设置，尚未执行 endpoint/model/dimension 探针 |
+| 真实 Embedding Provider | ✅ 隔离 Gate 通过 | Ollama `0.32.12`、`embeddinggemma`、768 维、sqlite-vec `v0.1.9`；正式 worker 故障恢复待测 |
 | dispatch/closure | ✅ 代码与专项测试通过 | 最终仍需全新正式 iteration 证据 |
 | 24 小时墙钟演练 | ❌ 未执行 | 正式上线阻塞项 |
 | 真机 smoke | ❌ 未执行 | 正式上线阻塞项 |
@@ -237,13 +237,14 @@ PASS=35 FAIL=0 WARN=0
 
 1. **已完成：** 只读对账正式 RuntimeStorage。7 条 finding 均为旧 `_sys_automation_*` adhoc thread 假 orphan，正式 actionable conflict 为 0；outbox 当前为 26 条 pending、attempt=0，其中普通任务 15 条、system automation 11 条。没有删除、消费、重放或修改 `iter_009`。详见 `reports/RUNTIME-STATE-RECONCILIATION-20260814.md`。
 2. **隔离 Gate 已完成：** sqlite-vec `v0.1.9`、混合检索、versioned shadow reindex、原子切换、失败结构化降级和测试正式库隔离通过；详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。
-3. **进行中但阻塞：** 真实云 embedding 隔离 Gate 工具和防误触测试已完成；现有聊天服务候选 `/embeddings` 返回 HTTP 503。提供独立可用的 endpoint/model/dimension 后在全新临时 `OMC_DATA_ROOT` 重跑；未经审批不消费正式 26 条 outbox。详见 `reports/REAL-EMBEDDING-GATE-20260814.md`。
+3. **已完成：** 真实 Embedding Provider 隔离 Gate 使用本地 Ollama `embeddinggemma` 通过；endpoint/model/768 维、真实向量写入、语义检索、ACL、状态过滤和 Prompt 预算均通过，正式 26 条 outbox 未消费。详见 `reports/REAL-EMBEDDING-GATE-20260814.md`。
+4. **下一步：** 在全新临时 Runtime 中验证 Ollama 不可用时的 outbox holding、durable backoff、结构化降级和恢复补向量。
 4. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、backoff、优先级和恢复 UI。
-5. 创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
-6. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
-7. 将在线备份恢复到全新 data root，执行 TaskTree/checkpoint/store/outbox/dispatch/acceptance 的只读对账。
-8. 执行完整 24 小时墙钟演练和真机 smoke。
-9. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
+6. 创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
+7. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
+8. 将在线备份恢复到全新 data root，执行 TaskTree/checkpoint/store/outbox/dispatch/acceptance 的只读对账。
+9. 执行完整 24 小时墙钟演练和真机 smoke。
+10. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
 
 ## 6. 上线判定
 
@@ -269,4 +270,4 @@ Code remediation, audited formal skill reconciliation, historical record quarant
 
 隔离 ARM64 Runtime SQLite 已实际加载 `sqlite-vec v0.1.9`，完成结构化过滤优先的混合检索、v1→v2 versioned shadow reindex、单事务 active 切换、模型空间不兼容时结构化降级，以及失败时 outbox 保持 `pending/attempt=0`。完整测试为 `4693 passed, 5 skipped, 73 warnings in 135.83s`。
 
-首次完整测试暴露出 lifespan 测试误用正式 `.onemancompany/data/runtime.sqlite3` 的隔离漏洞，并对正式库执行了 OMC schema v4 additive migration。没有回滚或覆盖正式库；只读审计确认 `integrity_check=ok`、index contract=0、archived vector=0、正式 outbox 26 条仍全部未尝试。代码现已让相对数据库路径跟随 `OMC_DATA_ROOT`，unit lifespan 使用临时数据库，并在 pytest 直接访问仓库正式库时 fail closed。修复后完整测试前后正式库 SHA-256 保持 `2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de`，大小保持 `120377344`。真实云 embedding 配置仍未提供，因此 `formal_24h_launch_allowed=false`。详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。
+首次完整测试暴露出 lifespan 测试误用正式 `.onemancompany/data/runtime.sqlite3` 的隔离漏洞，并对正式库执行了 OMC schema v4 additive migration。没有回滚或覆盖正式库；只读审计确认 `integrity_check=ok`、index contract=0、archived vector=0、正式 outbox 26 条仍全部未尝试。代码现已让相对数据库路径跟随 `OMC_DATA_ROOT`，unit lifespan 使用临时数据库，并在 pytest 直接访问仓库正式库时 fail closed。修复后完整测试前后正式库 SHA-256 保持 `2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de`，大小保持 `120377344`。本地 Ollama `embeddinggemma` 真实 Embedding Gate 已通过；正式 worker 故障恢复、聊天 Provider 429、真实服务恢复和 24 小时墙钟仍未完成，因此 `formal_24h_launch_allowed=false`。详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。

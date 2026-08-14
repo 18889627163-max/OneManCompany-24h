@@ -1,6 +1,6 @@
 # OneManCompany 24 小时持续运行、可恢复执行与长期记忆实施计划
 
-> 版本：3.7
+> 版本：3.8
 > 日期：2026-08-14  
 > 目标架构：SQLite + LangGraph AsyncSqliteSaver + AsyncSqliteStore/sqlite-vec + TaskTree standard v2  
 > 当前状态：实施中；尚未满足正式启动 24 小时模式的条件
@@ -24,6 +24,7 @@
 7. `iter_009` 及其历史失败、取消和自动接受记录保持原样，不迁移、不修复、不伪造新证据。
 8. **本轮正式采用 SQLite 单机方案。** 该决定已确认；在本轮上线 Gate 通过前，不切换 PostgreSQL，也不同时维护 PostgreSQL/SQLite 双写路径。
 9. 等单机方案通过 24 小时演练后，再根据多进程、多主机和写入压力决定是否迁移 PostgreSQL。
+10. Embedding Provider 正式采用本机 loopback Ollama `embeddinggemma`（768 维）；不可用时只允许结构化降级，不自动切换模型或向量空间。
 
 ### 1.1 为什么本轮选择 SQLite
 
@@ -92,8 +93,8 @@
 | dispatch intent | 已有 durable 表和基础方法 | 完成 prepared 到 started 的 reconciler |
 | Memory Outbox/Review/Conflict 表 | 已有基础 schema | 实现 worker、ACL、状态机和管理接口 |
 | SQLite online backup | 已有基础实现和测试 | 加入保留策略、恢复演练和自动化 |
-| `sqlite-vec` 运行依赖 | ARM64 隔离环境已实际加载 `v0.1.9` 并完成向量写入/检索 | 完成受控真实云 embedding 的 endpoint/model/dimension Gate |
-| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL、混合检索和 versioned shadow reindex 已实现并隔离演练 | 完成真实云 embedding 和正式 worker 让位演练 |
+| `sqlite-vec` 运行依赖 | ARM64 隔离环境已实际加载 `v0.1.9` 并完成向量写入/检索 | 已用本地 Ollama 完成真实 endpoint/model/dimension、向量写入和检索 Gate |
+| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL、混合检索和 versioned shadow reindex 已实现并隔离演练 | 真实 Ollama Gate 已完成；继续正式 worker 故障恢复和让位演练 |
 | 长期记忆检索工具 | `search_memory`、`propose_memory` 已实现并按 runtime identity 授权 | 完成真实项目成员和 prompt budget 演练 |
 | Memory worker | durable Memory Outbox worker 已接入 lifespan | 验证真实 embedding pending/backoff 和 Provider 让位 |
 | 管理 API/CLI/前端状态 | 管理 API 与 CLI 已实现；health 状态已接入 | 补齐并实测全部前端 attention/holding 展示 |
@@ -131,7 +132,7 @@
 - 全新专用 standard v2 演练 iteration 上的真实后端停止/重启和同 thread resume；
 - dispatch、executor started、业务 side-effect 三个阶段的真实 receipt/ledger 故障注入；
 - 受控真实云 Provider HTTP 429、长 backoff、优先级竞争和恢复 UI；
-- 真实云 embedding endpoint/model/dimension 探针、正式 worker pending/backoff 和 Provider 让位；
+- 本地 Ollama Embedding Gate 已通过；正式 worker pending/backoff 和 Provider 让位仍待验证；
 - 独立恢复后的真实 TaskTree/checkpoint/receipt/acceptance 只读对账；
 - 24 小时墙钟、真机 smoke、FFmpeg/FFprobe 证据；
 - 全新 standard v2 iteration 的四人正式复验与显式验收。
@@ -564,6 +565,9 @@ OMC_MEMORY_INDEX_VERSION=v1
 规则：
 
 - embedding 配置不默认复用聊天模型名；
+- 当前默认 Provider 为仅监听 `127.0.0.1:11434` 的本地 Ollama `embeddinggemma`；
+- `OpenAIEmbeddings` 必须保持字符串输入兼容模式，禁止向 Ollama 发送 token-id 数组；
+- Ollama 不可用时降级为结构化检索，禁止自动切换未知模型；
 - API key 不写入 memory、checkpoint、audit 或错误正文；
 - 启动探针验证模型、维度和 sqlite-vec 可加载；
 - 维度与 active index 不一致时禁止向旧 index 写入；
@@ -1366,11 +1370,11 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 
 ### 下一组 P1：真实长期记忆与 Provider Gate
 
-1. 配置受控云 embedding，在全新临时 `OMC_DATA_ROOT` 执行 endpoint/model/dimension 探针；当前 Gate 工具和隔离测试已完成，但现有聊天服务候选 `/embeddings` 于 2026-08-14 返回 HTTP 503，等待独立可用 embedding 配置后重跑；
-2. 使用真实云返回验证 namespace/status 先过滤、向量检索、去重重排和 prompt budget；
+1. 已配置本机 loopback Ollama `0.32.12` + `embeddinggemma`，在全新临时 `OMC_DATA_ROOT` 完成 endpoint/model/768 维探针；LangChain 已固定字符串输入兼容模式；
+2. 已使用真实本地模型返回验证 namespace/status 先过滤、向量检索、去重重排和 Prompt budget；
 3. 验证真实 embedding 故障下的 pending 补向量和 memory worker Provider 让位；
 4. 经审批后才允许在正式 Runtime SQLite 注册目标 index version；正式 26 条 outbox 不得直接消费；
-5. 使用受控真实云 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、durable backoff、优先级和恢复 UI。
+5. 使用受控真实聊天 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、durable backoff、优先级和恢复 UI。
 
 ### 下一组 P1：真实服务恢复与独立对账
 

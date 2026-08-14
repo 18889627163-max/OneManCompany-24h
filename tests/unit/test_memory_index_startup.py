@@ -34,9 +34,12 @@ async def test_prepare_memory_index_degrades_when_configuration_is_incomplete():
 
 @pytest.mark.asyncio
 async def test_prepare_memory_index_probes_dimensions_and_records_safe_identity(monkeypatch):
+    created = []
+
     class FakeOpenAIEmbeddings:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            created.append(kwargs)
 
         async def aembed_query(self, text):
             return [0.0, 0.0, 0.0, 0.0]
@@ -50,6 +53,7 @@ async def test_prepare_memory_index_probes_dimensions_and_records_safe_identity(
     assert vector_status == "healthy"
     assert index["dims"] == 4
     assert index["embedding_model"] == "embedding-model-v1"
+    assert created[0]["check_embedding_ctx_length"] is False
     assert index["provider_fingerprint"] == hashlib.sha256(
         b"https://embedding.example.test/v1"
     ).hexdigest()

@@ -1,18 +1,74 @@
 {
   "gate": "real_cloud_embedding_isolated",
-  "started_at": "2026-08-14T18:07:38.542046+00:00",
+  "started_at": "2026-08-14T19:21:43.171753+00:00",
   "formal_data_root": "/Users/hanzhen/Downloads/OneManCompany-main/.onemancompany",
   "formal_outbox_touched": false,
   "formal_launch_allowed": false,
   "configuration": {
-    "provider_fingerprint": "9c215f0b555c6c9374b3235018713683596fd8fe55037e92e4a97e62854b9bb7",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536,
-    "index_version": "candidate-v1"
+    "provider_fingerprint": "9b514b1a65f6ebfaa4da53a116ea003831b044dc32a989733eace74554ef5b0c",
+    "model": "embeddinggemma",
+    "dimensions": 768,
+    "index_version": "v1"
   },
-  "isolated_data_root": "/private/var/folders/dy/kgsk8ztj1nsdd8crjsh2gw3w0000gn/T/omc-real-embedding-gate-vug0k9mj",
-  "status": "failed",
-  "error_type": "RuntimeError",
-  "error": "embedding endpoint probe failed: InternalServerError status_code=503",
-  "completed_at": "2026-08-14T18:07:40.608386+00:00"
+  "isolated_data_root": "/private/var/folders/dy/kgsk8ztj1nsdd8crjsh2gw3w0000gn/T/omc-real-embedding-gate-gps1d_1v",
+  "result": {
+    "checks": {
+      "probe_healthy": true,
+      "vector_index_enabled": true,
+      "own_private_retrieved": true,
+      "other_private_filtered": true,
+      "verified_project_retrieved": true,
+      "candidate_filtered": true,
+      "teammate_can_read_project": true,
+      "teammate_cannot_read_private": true,
+      "outsider_cannot_read_project": true,
+      "deduplicated": true,
+      "metadata_complete": true,
+      "default_prompt_budget": true,
+      "tight_prompt_budget": true,
+      "semantic_scores_present": true,
+      "vectors_persisted": true,
+      "formal_outbox_not_imported": true
+    },
+    "embedding_status": "healthy",
+    "vector_status": "healthy",
+    "sqlite_integrity": "ok",
+    "sqlite_vec_version": "v0.1.9",
+    "memory_index": {
+      "active_version": "v1",
+      "target_version": "v1",
+      "vector_enabled": true,
+      "reindex_required": false,
+      "versions": [
+        {
+          "index_version": "v1",
+          "dimensions": 768,
+          "embedding_model": "embeddinggemma",
+          "active": true,
+          "created_at": "2026-08-14T19:21:44.232384+00:00",
+          "activated_at": "2026-08-14T19:21:44.232384+00:00"
+        }
+      ]
+    },
+    "vector_count": 4,
+    "outbox_count": 0,
+    "retrieval": {
+      "member_count": 2,
+      "teammate_count": 1,
+      "outsider_count": 0,
+      "budget_count": 1,
+      "member_rendered_chars": 323,
+      "budget_rendered_chars": 166,
+      "member_scopes": [
+        "project",
+        "employee"
+      ],
+      "member_statuses": [
+        "verified",
+        "active"
+      ]
+    }
+  },
+  "status": "passed",
+  "completed_at": "2026-08-14T19:21:53.623906+00:00"
 }

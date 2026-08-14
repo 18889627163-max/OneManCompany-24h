@@ -152,6 +152,8 @@ async def _run_gate(data_root: Path, config: dict[str, Any]) -> dict[str, Any]:
         api_key=config["api_key"],
         model=config["model"],
         dimensions=config["dimensions"],
+        # Preserve strings for providers such as Ollama that reject token-id arrays.
+        check_embedding_ctx_length=False,
     )
     try:
         direct_probe = await probe_client.aembed_query("onemancompany real embedding gate probe")

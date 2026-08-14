@@ -855,6 +855,9 @@ async def _prepare_memory_index(settings):
         api_key=settings.omc_memory_embedding_api_key,
         model=settings.omc_memory_embedding_model,
         dimensions=int(settings.omc_memory_embedding_dimensions),
+        # Keep the request input as text. Some OpenAI-compatible providers
+        # (including Ollama) reject LangChain's default token-id arrays.
+        check_embedding_ctx_length=False,
     )
     try:
         probe = await embeddings.aembed_query("onemancompany memory index probe")
