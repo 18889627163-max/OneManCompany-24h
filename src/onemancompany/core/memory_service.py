@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from onemancompany.core.config import EMPLOYEES_DIR, EX_EMPLOYEES_DIR, PROJECTS_DIR
 from onemancompany.core.runtime_context import get_task_runtime_context
@@ -193,6 +194,7 @@ class MemoryService:
         expires_at: str | None = None,
         dedupe_key: str | None = None,
         trusted_source: bool = False,
+        index_immediately: bool = True,
     ) -> dict[str, Any]:
         if memory_type not in MEMORY_TYPES:
             raise ValueError(f"unsupported memory_type: {memory_type}")
@@ -273,12 +275,15 @@ class MemoryService:
             "confidence": max(0.0, min(1.0, float(confidence))),
             "valid_from": iso_now(),
             "expires_at": expires_at,
-            "embedding_status": "pending" if not getattr(self.storage, "memory_vector_enabled", False) else "indexed",
+            # The structured record is authoritative for memory persistence.
+            # Vector indexing is a second, retryable phase and must never make
+            # this first write disappear when an embedding provider is down.
+            "embedding_status": "pending",
             "embedding_index_version": getattr(self.storage, "memory_index_version", "v1"),
             "created_at": iso_now(),
             "verified_at": iso_now() if status in ACTIVE_STATUSES and status == "verified" else None,
         }
-        await self.storage.put_memory(namespace, key, value, index=self._index_arg())
+        await self.storage.put_memory(namespace, key, value, index=False)
         if conflicting is not None:
             old_key, previous = conflicting
             conflict_id = str(uuid.uuid4())
@@ -290,7 +295,34 @@ class MemoryService:
                 "conflict_id": conflict_id, "old_memory_id": previous.get("memory_id"), "new_memory_id": memory_id,
             })
             value["conflict_id"] = conflict_id
+        if index_immediately and getattr(self.storage, "memory_vector_enabled", False):
+            try:
+                value = await self.storage.index_memory(namespace, key, value)
+            except Exception as exc:
+                # Embedding is auxiliary context. Keep the structured memory
+                # pending; a durable outbox event or reindex can retry it.
+                logger.warning(
+                    "Memory vector indexing deferred for {} ({})",
+                    key,
+                    type(exc).__name__,
+                )
         return {"key": key, **value}
+
+    async def ensure_indexed(
+        self,
+        *,
+        namespace: tuple[str, ...],
+        key: str,
+    ) -> dict[str, Any]:
+        """Complete the retryable vector phase for one structured memory."""
+        item = await self.storage.memory_store.aget(namespace, key)
+        if item is None:
+            raise KeyError("memory not found")
+        value = dict(item.value or {})
+        if value.get("embedding_status") == "indexed":
+            return {"key": item.key, **value}
+        indexed = await self.storage.index_memory(namespace, key, value)
+        return {"key": key, **indexed}
 
     async def search(
         self,

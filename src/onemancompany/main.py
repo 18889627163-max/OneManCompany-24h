@@ -859,20 +859,8 @@ async def _prepare_memory_index(settings):
         # (including Ollama) reject LangChain's default token-id arrays.
         check_embedding_ctx_length=False,
     )
-    try:
-        probe = await embeddings.aembed_query("onemancompany memory index probe")
-        actual_dimensions = len(probe)
-    except Exception as exc:
-        # Do not persist credentials or provider response bodies.
-        logger.warning("Memory embedding probe failed ({}); using structured-only memory", type(exc).__name__)
-        return None, "degraded", "unavailable"
-    expected_dimensions = int(settings.omc_memory_embedding_dimensions)
-    if actual_dimensions != expected_dimensions:
-        raise ValueError(
-            f"memory embedding dimension mismatch: configured={expected_dimensions}, actual={actual_dimensions}"
-        )
-    return {
-        "dims": expected_dimensions,
+    memory_index = {
+        "dims": int(settings.omc_memory_embedding_dimensions),
         "embed": embeddings,
         "text_fields": ["text"],
         "index_version": settings.omc_memory_index_version,
@@ -880,7 +868,25 @@ async def _prepare_memory_index(settings):
         "provider_fingerprint": hashlib.sha256(
             settings.omc_memory_embedding_base_url.rstrip("/").encode("utf-8")
         ).hexdigest(),
-    }, "healthy", "healthy"
+        "provider_available": False,
+    }
+    try:
+        probe = await embeddings.aembed_query("onemancompany memory index probe")
+        actual_dimensions = len(probe)
+    except Exception as exc:
+        # Do not persist credentials or provider response bodies.
+        logger.warning(
+            "Memory embedding probe failed ({}); structured memory will persist and the outbox will retry vectors",
+            type(exc).__name__,
+        )
+        return memory_index, "degraded", "unavailable"
+    expected_dimensions = int(settings.omc_memory_embedding_dimensions)
+    if actual_dimensions != expected_dimensions:
+        raise ValueError(
+            f"memory embedding dimension mismatch: configured={expected_dimensions}, actual={actual_dimensions}"
+        )
+    memory_index["provider_available"] = True
+    return memory_index, "healthy", "healthy"
 
 
 @asynccontextmanager
@@ -917,7 +923,7 @@ async def _runtime_lifespan(app: FastAPI):
         set_provider_gateway(gateway)
         if settings.omc_memory_enabled:
             from onemancompany.core.memory_worker import MemoryOutboxWorker
-            memory_worker = MemoryOutboxWorker(storage)
+            memory_worker = MemoryOutboxWorker(storage, provider_gateway=gateway)
             await memory_worker.start()
         else:
             logger.info("Long-term memory worker disabled by OMC_MEMORY_ENABLED")

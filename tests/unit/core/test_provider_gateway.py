@@ -156,10 +156,109 @@ async def test_same_request_id_resumes_without_resetting_attempt_or_retry_state(
         assert row[0] == "completed"
         assert row[1] == 1
         retry = await second.fetchone(
-            "SELECT attempt FROM provider_retry_state WHERE request_id=?",
+            "SELECT attempt,next_retry_at,last_error_class,last_error "
+            "FROM provider_retry_state WHERE request_id=?",
             ("resume-provider-request",),
         )
         assert retry[0] == 1
+        assert retry[1:] == (None, None, None)
     finally:
         await second_gateway.stop()
         await second.close()
+
+
+@pytest.mark.asyncio
+async def test_business_waiter_runs_before_memory_waiter_for_same_provider_pool(tmp_path):
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize()
+    gateway = ProviderGateway(storage, default_concurrency=1)
+    await gateway.start()
+    blocker_started = asyncio.Event()
+    release_blocker = asyncio.Event()
+    order: list[str] = []
+
+    context = {
+        "provider": "test",
+        "credential_fingerprint": "shared-account",
+        "account_or_model_pool": "shared-pool",
+    }
+
+    async def blocker():
+        blocker_started.set()
+        await release_blocker.wait()
+        order.append("blocker")
+        return "blocker"
+
+    async def record(name: str):
+        order.append(name)
+        return name
+
+    try:
+        active = asyncio.create_task(
+            gateway.invoke(
+                {**context, "request_id": "priority-blocker"},
+                ProviderPriority.BUSINESS,
+                blocker,
+            )
+        )
+        await blocker_started.wait()
+        memory = asyncio.create_task(
+            gateway.invoke(
+                {**context, "request_id": "priority-memory"},
+                ProviderPriority.MEMORY,
+                lambda: record("memory"),
+            )
+        )
+        await asyncio.sleep(0)
+        business = asyncio.create_task(
+            gateway.invoke(
+                {**context, "request_id": "priority-business"},
+                ProviderPriority.BUSINESS,
+                lambda: record("business"),
+            )
+        )
+        for _ in range(100):
+            if (await gateway.metrics())["queued"] == 2:
+                break
+            await asyncio.sleep(0.001)
+        assert (await gateway.metrics())["queued"] == 2
+        release_blocker.set()
+        await asyncio.gather(active, memory, business)
+        assert order == ["blocker", "business", "memory"]
+    finally:
+        await gateway.stop()
+        await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_callback_runs_after_a_held_request_succeeds(tmp_path):
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize()
+    gateway = ProviderGateway(storage, max_backoff_seconds=0.01)
+    events: list[tuple[str, int]] = []
+    calls = 0
+
+    async def flaky_call():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("HTTP 429 Concurrency limit exceeded for user")
+        return "ok"
+
+    try:
+        result = await gateway.invoke(
+            {
+                "request_id": "held-then-recovered",
+                "provider": "test",
+                "credential_fingerprint": "credential-a",
+                "on_holding": lambda attempt, *_: events.append(("holding", attempt)),
+                "on_recovered": lambda attempt: events.append(("recovered", attempt)),
+            },
+            ProviderPriority.BUSINESS,
+            flaky_call,
+        )
+        assert result == "ok"
+        assert events == [("holding", 1), ("recovered", 1)]
+    finally:
+        await gateway.stop()
+        await storage.close()

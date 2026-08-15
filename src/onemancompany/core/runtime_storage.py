@@ -258,7 +258,9 @@ class RuntimeStorage:
         self._write_lock = asyncio.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._initialized = False
+        self.memory_vector_configured = False
         self.memory_vector_enabled = False
+        self.memory_embedding_available = False
         self.memory_index_version = "v1"
         self.memory_index_target_version: str | None = None
         self.memory_reindex_required = False
@@ -306,6 +308,7 @@ class RuntimeStorage:
         config["provider_fingerprint"] = str(
             config.get("provider_fingerprint") or "local-or-unspecified"
         ).strip()
+        config["provider_available"] = bool(config.get("provider_available", True))
         if not config["embedding_model"]:
             raise ValueError("memory vector index requires embedding_model")
         return config
@@ -438,7 +441,12 @@ class RuntimeStorage:
             normalized_index = self._normalize_memory_index(memory_index)
             index_state = await self._validate_memory_index(normalized_index)
             self._memory_index_config = normalized_index
-            self.memory_vector_enabled = bool(normalized_index and index_state["usable"])
+            self.memory_vector_configured = bool(normalized_index and index_state["usable"])
+            self.memory_embedding_available = bool(
+                self.memory_vector_configured
+                and normalized_index.get("provider_available", True)
+            )
+            self.memory_vector_enabled = self.memory_embedding_available
             self.memory_index_version = str(
                 index_state.get("active_version")
                 or (normalized_index or {}).get("index_version")
@@ -518,7 +526,9 @@ class RuntimeStorage:
         self.memory_store = None
         self._loop = None
         self._initialized = False
+        self.memory_vector_configured = False
         self.memory_vector_enabled = False
+        self.memory_embedding_available = False
         self.memory_index_target_version = None
         self.memory_reindex_required = False
         self._memory_index_config = None
@@ -539,6 +549,33 @@ class RuntimeStorage:
         async with self._memory_index_lock:
             await self.memory_store.aput(namespace, key, value, index=index)
 
+    async def index_memory(
+        self,
+        namespace: tuple[str, ...],
+        key: str,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Index one already-persisted memory without losing structured data.
+
+        The caller must write the ``pending`` record with ``index=False`` first.
+        If the provider fails here, LangGraph's failed indexed upsert leaves that
+        structured record available for a later durable outbox retry.
+        """
+        if not self.memory_vector_configured:
+            raise RuntimeError("memory vector index is not configured")
+        indexed = dict(value)
+        indexed["embedding_status"] = "indexed"
+        indexed["embedding_index_version"] = self.memory_index_version
+        try:
+            await self.put_memory(namespace, key, indexed, index=None)
+        except Exception:
+            self.memory_embedding_available = False
+            self.memory_vector_enabled = False
+            raise
+        self.memory_embedding_available = True
+        self.memory_vector_enabled = True
+        return indexed
+
     async def memory_index_status(self) -> dict[str, Any]:
         """Return a sanitized version/index state for health and administration."""
         rows = await self.fetchall(
@@ -548,7 +585,9 @@ class RuntimeStorage:
         return {
             "active_version": self.memory_index_version if rows else None,
             "target_version": self.memory_index_target_version,
+            "vector_configured": self.memory_vector_configured,
             "vector_enabled": self.memory_vector_enabled,
+            "embedding_available": self.memory_embedding_available,
             "reindex_required": self.memory_reindex_required,
             "versions": [
                 {
@@ -831,7 +870,7 @@ class RuntimeStorage:
 
     async def finish_memory_outbox(self, event_id: str) -> None:
         await self.execute(
-            "UPDATE memory_outbox SET status='completed',processed_at=?,last_error=NULL WHERE event_id=?",
+            "UPDATE memory_outbox SET status='completed',processed_at=?,next_retry_at=NULL,last_error=NULL WHERE event_id=?",
             (iso_now(), event_id),
         )
 

@@ -1,0 +1,1521 @@
+{
+  "status": "passed",
+  "generated_at": "2026-08-15T12:24:45.103486+08:00",
+  "maintenance_window": {
+    "window_id": "isolated-recovery-drill-20260815",
+    "scope": "isolated_temp_data_root",
+    "status": "closed",
+    "started_at": "2026-08-15T12:24:40.063900+08:00",
+    "formal_service_stop_authorized": false,
+    "formal_data_writes_authorized": false,
+    "drill_data_root": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL",
+    "restore_data_root": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL-readonly-restore",
+    "ended_at": "2026-08-15T12:24:45.103244+08:00",
+    "result": "passed"
+  },
+  "data_root": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL",
+  "restore_root": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL-readonly-restore",
+  "runs": {
+    "dispatch": {
+      "crash_returncode": 87,
+      "crash_stderr": "2026-08-15 12:24:40.823 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "resume_returncode": 0,
+      "resume_stderr": "2026-08-15 12:24:41.563 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "crash": {
+        "phase": "crash",
+        "scenario": "dispatch",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+        "human_messages": 1,
+        "snapshot": {
+          "scenario": "dispatch",
+          "node": {
+            "id": "b00000000001",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: dispatch",
+            "description_preview": "Recover exactly once after the dispatch durability boundary",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "processing",
+            "acceptance_result": null,
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861258",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "node_id": "b00000000001",
+              "task_key": "recovery-dispatch",
+              "tree_persisted": true,
+              "scheduler_registered": true,
+              "executor_started": false,
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "recorded_at": "2026-08-15T12:24:40.881462+08:00"
+            },
+            "task_key": "recovery-dispatch",
+            "dispatch_request_fingerprint": "sha256:279d6468bf2b6c8e7d5211bd50cc13099c2e74653bd01a50b4914832bc7c82ac",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+            "checkpoint_status": "active",
+            "last_checkpoint_at": "2026-08-15T12:24:40.881848+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "dispatch_persisted",
+              "scenario": "dispatch",
+              "dispatch_state": "scheduled"
+            },
+            "acceptance_audit": null,
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-dispatch",
+            "request_fingerprint": "sha256:279d6468bf2b6c8e7d5211bd50cc13099c2e74653bd01a50b4914832bc7c82ac",
+            "node_id": "b00000000001",
+            "state": "scheduled",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "executor_started": false,
+              "node_id": "b00000000001",
+              "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-dispatch",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:40.879314+00:00",
+            "updated_at": "2026-08-15T04:24:40.881476+00:00"
+          },
+          "tool_ledger": null,
+          "checkpoint_count": 3,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1
+          },
+          "external_side_effect_count": 0
+        }
+      },
+      "resume": {
+        "phase": "resume",
+        "scenario": "dispatch",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+        "checkpoint_before": true,
+        "human_messages": 1,
+        "assistant_messages": 4,
+        "acceptance": {
+          "status": "accepted",
+          "node_id": "b00000000001",
+          "notes": "Explicitly accepted after dispatch recovery reconciliation."
+        },
+        "snapshot": {
+          "scenario": "dispatch",
+          "node": {
+            "id": "b00000000001",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: dispatch",
+            "description_preview": "",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "accepted",
+            "acceptance_result": {
+              "passed": true,
+              "notes": "Explicitly accepted after dispatch recovery reconciliation."
+            },
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861258",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "executor_started": true,
+              "node_id": "b00000000001",
+              "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-dispatch",
+              "tree_persisted": true,
+              "executor_started_at": "2026-08-15T12:24:41.611978+08:00"
+            },
+            "task_key": "recovery-dispatch",
+            "dispatch_request_fingerprint": "sha256:279d6468bf2b6c8e7d5211bd50cc13099c2e74653bd01a50b4914832bc7c82ac",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+            "checkpoint_status": "completed",
+            "last_checkpoint_at": "2026-08-15T12:24:41.628307+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "completed",
+              "scenario": "dispatch",
+              "dispatch_state": "started",
+              "executor_started": true,
+              "side_effects_confirmed": [
+                "ledger:b00000000001:recovery_business_side_effect"
+              ],
+              "external_count": 1,
+              "completed_at": "2026-08-15T12:24:41.628317+08:00"
+            },
+            "acceptance_audit": {
+              "decision": "accepted",
+              "decided_by": "00003",
+              "decided_via": "accept_child",
+              "review_node_id": "a00000000001",
+              "decided_at": "2026-08-15T12:24:41.643822+08:00",
+              "criteria_results": [
+                {
+                  "criterion": "same checkpoint thread",
+                  "passed": true
+                },
+                {
+                  "criterion": "receipts and side effect exactly once",
+                  "passed": true
+                }
+              ],
+              "evidence_refs": [
+                "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+                "dispatch_intent:a00000000001:00006:recovery-dispatch",
+                "tool_ledger:b00000000001:recovery_business_side_effect"
+              ],
+              "notes": "Explicitly accepted after dispatch recovery reconciliation."
+            },
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-dispatch",
+            "request_fingerprint": "sha256:279d6468bf2b6c8e7d5211bd50cc13099c2e74653bd01a50b4914832bc7c82ac",
+            "node_id": "b00000000001",
+            "state": "started",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "executor_started": true,
+              "executor_started_at": "2026-08-15T12:24:41.611978+08:00",
+              "node_id": "b00000000001",
+              "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-dispatch",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:40.879314+00:00",
+            "updated_at": "2026-08-15T04:24:41.611999+00:00"
+          },
+          "tool_ledger": {
+            "status": "completed",
+            "result_reference": null,
+            "result": {
+              "employee_id": "00006",
+              "external_count": 1,
+              "idempotency_key": "recovery:dispatch",
+              "scenario": "dispatch",
+              "status": "success"
+            }
+          },
+          "checkpoint_count": 6,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1,
+            "recovery_drill_executor_started": 1,
+            "recovery_drill_side_effect_completed": 1
+          },
+          "external_side_effect_count": 1
+        }
+      }
+    },
+    "executor_started": {
+      "crash_returncode": 87,
+      "crash_stderr": "2026-08-15 12:24:42.419 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "resume_returncode": 0,
+      "resume_stderr": "2026-08-15 12:24:43.158 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "crash": {
+        "phase": "crash",
+        "scenario": "executor_started",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+        "human_messages": 1,
+        "snapshot": {
+          "scenario": "executor_started",
+          "node": {
+            "id": "b00000000002",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: executor_started",
+            "description_preview": "Recover exactly once after the executor_started durability boundary",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "processing",
+            "acceptance_result": null,
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861316",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "executor_started": true,
+              "node_id": "b00000000002",
+              "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-executor_started",
+              "tree_persisted": true,
+              "executor_started_at": "2026-08-15T12:24:42.479154+08:00"
+            },
+            "task_key": "recovery-executor_started",
+            "dispatch_request_fingerprint": "sha256:efa3f8e2c98ea5292855831f244a43c8747e15bf20a281cc3ae3d212cbac2222",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+            "checkpoint_status": "active",
+            "last_checkpoint_at": "2026-08-15T12:24:42.479833+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "executor_started",
+              "scenario": "executor_started",
+              "dispatch_state": "started",
+              "executor_started": true
+            },
+            "acceptance_audit": null,
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-executor_started",
+            "request_fingerprint": "sha256:efa3f8e2c98ea5292855831f244a43c8747e15bf20a281cc3ae3d212cbac2222",
+            "node_id": "b00000000002",
+            "state": "started",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "executor_started": true,
+              "executor_started_at": "2026-08-15T12:24:42.479154+08:00",
+              "node_id": "b00000000002",
+              "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-executor_started",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:42.468821+00:00",
+            "updated_at": "2026-08-15T04:24:42.479164+00:00"
+          },
+          "tool_ledger": null,
+          "checkpoint_count": 4,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1,
+            "recovery_drill_executor_started": 1
+          },
+          "external_side_effect_count": 0
+        }
+      },
+      "resume": {
+        "phase": "resume",
+        "scenario": "executor_started",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+        "checkpoint_before": true,
+        "human_messages": 1,
+        "assistant_messages": 4,
+        "acceptance": {
+          "status": "accepted",
+          "node_id": "b00000000002",
+          "notes": "Explicitly accepted after executor_started recovery reconciliation."
+        },
+        "snapshot": {
+          "scenario": "executor_started",
+          "node": {
+            "id": "b00000000002",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: executor_started",
+            "description_preview": "",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "accepted",
+            "acceptance_result": {
+              "passed": true,
+              "notes": "Explicitly accepted after executor_started recovery reconciliation."
+            },
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861316",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "executor_started": true,
+              "node_id": "b00000000002",
+              "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-executor_started",
+              "tree_persisted": true,
+              "executor_started_at": "2026-08-15T12:24:42.479154+08:00"
+            },
+            "task_key": "recovery-executor_started",
+            "dispatch_request_fingerprint": "sha256:efa3f8e2c98ea5292855831f244a43c8747e15bf20a281cc3ae3d212cbac2222",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+            "checkpoint_status": "completed",
+            "last_checkpoint_at": "2026-08-15T12:24:43.218485+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "completed",
+              "scenario": "executor_started",
+              "dispatch_state": "started",
+              "executor_started": true,
+              "side_effects_confirmed": [
+                "ledger:b00000000002:recovery_business_side_effect"
+              ],
+              "external_count": 1,
+              "completed_at": "2026-08-15T12:24:43.218494+08:00"
+            },
+            "acceptance_audit": {
+              "decision": "accepted",
+              "decided_by": "00003",
+              "decided_via": "accept_child",
+              "review_node_id": "a00000000001",
+              "decided_at": "2026-08-15T12:24:43.236103+08:00",
+              "criteria_results": [
+                {
+                  "criterion": "same checkpoint thread",
+                  "passed": true
+                },
+                {
+                  "criterion": "receipts and side effect exactly once",
+                  "passed": true
+                }
+              ],
+              "evidence_refs": [
+                "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+                "dispatch_intent:a00000000001:00006:recovery-executor_started",
+                "tool_ledger:b00000000002:recovery_business_side_effect"
+              ],
+              "notes": "Explicitly accepted after executor_started recovery reconciliation."
+            },
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-executor_started",
+            "request_fingerprint": "sha256:efa3f8e2c98ea5292855831f244a43c8747e15bf20a281cc3ae3d212cbac2222",
+            "node_id": "b00000000002",
+            "state": "started",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "executor_started": true,
+              "executor_started_at": "2026-08-15T12:24:42.479154+08:00",
+              "node_id": "b00000000002",
+              "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-executor_started",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:42.468821+00:00",
+            "updated_at": "2026-08-15T04:24:42.479164+00:00"
+          },
+          "tool_ledger": {
+            "status": "completed",
+            "result_reference": null,
+            "result": {
+              "employee_id": "00006",
+              "external_count": 1,
+              "idempotency_key": "recovery:executor_started",
+              "scenario": "executor_started",
+              "status": "success"
+            }
+          },
+          "checkpoint_count": 6,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1,
+            "recovery_drill_executor_started": 1,
+            "recovery_drill_side_effect_completed": 1
+          },
+          "external_side_effect_count": 1
+        }
+      }
+    },
+    "side_effect": {
+      "crash_returncode": 87,
+      "crash_stderr": "2026-08-15 12:24:44.025 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "resume_returncode": 0,
+      "resume_stderr": "2026-08-15 12:24:44.808 | DEBUG    | onemancompany.core.state:_init_employee_counter:348 - Skipping non-numeric employee directory: conversations\n",
+      "crash": {
+        "phase": "crash",
+        "scenario": "side_effect",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+        "human_messages": 1,
+        "snapshot": {
+          "scenario": "side_effect",
+          "node": {
+            "id": "b00000000003",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: side_effect",
+            "description_preview": "Recover exactly once after the side_effect durability boundary",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "processing",
+            "acceptance_result": null,
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861345",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "executor_started": true,
+              "node_id": "b00000000003",
+              "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-side_effect",
+              "tree_persisted": true,
+              "executor_started_at": "2026-08-15T12:24:44.087662+08:00"
+            },
+            "task_key": "recovery-side_effect",
+            "dispatch_request_fingerprint": "sha256:f6364d78a8dbb8d04d0c5c8fe3641b899169aa3c9a0ed63e83d80bf8cfb79b4d",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+            "checkpoint_status": "active",
+            "last_checkpoint_at": "2026-08-15T12:24:44.100631+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "side_effect_completed",
+              "scenario": "side_effect",
+              "dispatch_state": "started",
+              "executor_started": true,
+              "side_effects_confirmed": [
+                "ledger:b00000000003:recovery_business_side_effect"
+              ],
+              "external_count": 1
+            },
+            "acceptance_audit": null,
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-side_effect",
+            "request_fingerprint": "sha256:f6364d78a8dbb8d04d0c5c8fe3641b899169aa3c9a0ed63e83d80bf8cfb79b4d",
+            "node_id": "b00000000003",
+            "state": "started",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "executor_started": true,
+              "executor_started_at": "2026-08-15T12:24:44.087662+08:00",
+              "node_id": "b00000000003",
+              "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-side_effect",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:44.076058+00:00",
+            "updated_at": "2026-08-15T04:24:44.087676+00:00"
+          },
+          "tool_ledger": {
+            "status": "completed",
+            "result_reference": null,
+            "result": {
+              "employee_id": "00006",
+              "external_count": 1,
+              "idempotency_key": "recovery:side_effect",
+              "scenario": "side_effect",
+              "status": "success"
+            }
+          },
+          "checkpoint_count": 5,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1,
+            "recovery_drill_executor_started": 1,
+            "recovery_drill_side_effect_completed": 1
+          },
+          "external_side_effect_count": 1
+        }
+      },
+      "resume": {
+        "phase": "resume",
+        "scenario": "side_effect",
+        "thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+        "checkpoint_before": true,
+        "human_messages": 1,
+        "assistant_messages": 4,
+        "acceptance": {
+          "status": "accepted",
+          "node_id": "b00000000003",
+          "notes": "Explicitly accepted after side_effect recovery reconciliation."
+        },
+        "snapshot": {
+          "scenario": "side_effect",
+          "node": {
+            "id": "b00000000003",
+            "parent_id": "a00000000001",
+            "children_ids": [],
+            "employee_id": "00006",
+            "title": "Recovery drill: side_effect",
+            "description_preview": "",
+            "acceptance_criteria": [
+              "resume the same checkpoint thread",
+              "do not duplicate dispatch, executor receipt, or side effect",
+              "finish only after durable reconciliation"
+            ],
+            "node_type": "task",
+            "model_used": "",
+            "project_dir": "",
+            "implementation_path": "",
+            "status": "accepted",
+            "acceptance_result": {
+              "passed": true,
+              "notes": "Explicitly accepted after side_effect recovery reconciliation."
+            },
+            "project_id": "recovery-drill-20260815/iter_001",
+            "product_id": "",
+            "created_at": "2026-08-15T12:24:40.861345",
+            "completed_at": "",
+            "cost_usd": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "timeout_seconds": 3600,
+            "branch": 0,
+            "branch_active": true,
+            "depends_on": [],
+            "hold_reason": "",
+            "hold_started_at": "",
+            "retry_count": 0,
+            "stall_retry_count": 0,
+            "handled_child_failure_ids": [],
+            "event_key": "",
+            "dispatch_verification": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "executor_started": true,
+              "node_id": "b00000000003",
+              "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-side_effect",
+              "tree_persisted": true,
+              "executor_started_at": "2026-08-15T12:24:44.087662+08:00"
+            },
+            "task_key": "recovery-side_effect",
+            "dispatch_request_fingerprint": "sha256:f6364d78a8dbb8d04d0c5c8fe3641b899169aa3c9a0ed63e83d80bf8cfb79b4d",
+            "execution_generation": 1,
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+            "checkpoint_status": "completed",
+            "last_checkpoint_at": "2026-08-15T12:24:44.859280+08:00",
+            "next_retry_at": "",
+            "execution_checkpoint": {
+              "phase": "completed",
+              "scenario": "side_effect",
+              "dispatch_state": "started",
+              "executor_started": true,
+              "side_effects_confirmed": [
+                "ledger:b00000000003:recovery_business_side_effect"
+              ],
+              "external_count": 1,
+              "completed_at": "2026-08-15T12:24:44.859299+08:00"
+            },
+            "acceptance_audit": {
+              "decision": "accepted",
+              "decided_by": "00003",
+              "decided_via": "accept_child",
+              "review_node_id": "a00000000001",
+              "decided_at": "2026-08-15T12:24:44.877460+08:00",
+              "criteria_results": [
+                {
+                  "criterion": "same checkpoint thread",
+                  "passed": true
+                },
+                {
+                  "criterion": "receipts and side effect exactly once",
+                  "passed": true
+                }
+              ],
+              "evidence_refs": [
+                "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+                "dispatch_intent:a00000000001:00006:recovery-side_effect",
+                "tool_ledger:b00000000003:recovery_business_side_effect"
+              ],
+              "notes": "Explicitly accepted after side_effect recovery reconciliation."
+            },
+            "review_omission_count": 0,
+            "review_omission_processed": false,
+            "directives_count": 0
+          },
+          "dispatch_intent": {
+            "parent_id": "a00000000001",
+            "employee_id": "00006",
+            "task_key": "recovery-side_effect",
+            "request_fingerprint": "sha256:f6364d78a8dbb8d04d0c5c8fe3641b899169aa3c9a0ed63e83d80bf8cfb79b4d",
+            "node_id": "b00000000003",
+            "state": "started",
+            "receipt": {
+              "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "executor_started": true,
+              "executor_started_at": "2026-08-15T12:24:44.087662+08:00",
+              "node_id": "b00000000003",
+              "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+              "scheduler_registered": true,
+              "task_key": "recovery-side_effect",
+              "tree_persisted": true
+            },
+            "created_at": "2026-08-15T04:24:44.076058+00:00",
+            "updated_at": "2026-08-15T04:24:44.087676+00:00"
+          },
+          "tool_ledger": {
+            "status": "completed",
+            "result_reference": null,
+            "result": {
+              "employee_id": "00006",
+              "external_count": 1,
+              "idempotency_key": "recovery:side_effect",
+              "scenario": "side_effect",
+              "status": "success"
+            }
+          },
+          "checkpoint_count": 6,
+          "audit_counts": {
+            "recovery_drill_dispatch_persisted": 1,
+            "recovery_drill_executor_started": 1,
+            "recovery_drill_side_effect_completed": 1
+          },
+          "external_side_effect_count": 1
+        }
+      }
+    }
+  },
+  "backup": {
+    "database_path": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL/backups/runtime-service-recovery-20260815.sqlite3",
+    "manifest_path": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL/backups/runtime-service-recovery-20260815.sqlite3.manifest.json",
+    "integrity_check_result": "ok",
+    "manifest": {
+      "backup_id": "service-recovery-20260815",
+      "schema_version": 4,
+      "application_version": "service-recovery-gate",
+      "created_at": "2026-08-15T04:24:45.016454+00:00",
+      "database_path": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL/backups/runtime-service-recovery-20260815.sqlite3",
+      "manifest_path": "/private/tmp/omc-real-service-recovery-20260815-vvLsSL/backups/runtime-service-recovery-20260815.sqlite3.manifest.json",
+      "database_size_bytes": 237568,
+      "database_checksum": "sha256:4a7d1cb55afa4484376c4cc9313874575cccc9801f3ed5284d54a136bca8b5a1",
+      "backup_method": "sqlite_online_backup_api",
+      "quick_check_result": "ok",
+      "integrity_check_result": "ok",
+      "sqlite_page_count": 58,
+      "sqlite_page_size": 4096,
+      "verified_tables": [
+        "audit_events",
+        "automation_registry",
+        "checkpoints",
+        "dispatch_intents",
+        "execution_leases",
+        "memory_conflicts",
+        "memory_index_config",
+        "memory_outbox",
+        "memory_reviews",
+        "memory_vector_versions",
+        "provider_queue",
+        "provider_retry_state",
+        "recoveries",
+        "schema_migrations",
+        "store",
+        "store_migrations",
+        "tool_invocation_ledger",
+        "writes"
+      ]
+    }
+  },
+  "source_snapshot": {
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "read_only_enforced": true,
+    "dispatch_intents": [
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-dispatch",
+        "node_id": "b00000000001",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:41.611978+08:00",
+          "node_id": "b00000000001",
+          "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-dispatch",
+          "tree_persisted": true
+        }
+      },
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-executor_started",
+        "node_id": "b00000000002",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:42.479154+08:00",
+          "node_id": "b00000000002",
+          "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-executor_started",
+          "tree_persisted": true
+        }
+      },
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-side_effect",
+        "node_id": "b00000000003",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:44.087662+08:00",
+          "node_id": "b00000000003",
+          "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-side_effect",
+          "tree_persisted": true
+        }
+      }
+    ],
+    "tool_ledger": [
+      {
+        "node_id": "b00000000001",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:dispatch",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:dispatch",
+          "scenario": "dispatch",
+          "status": "success"
+        }
+      },
+      {
+        "node_id": "b00000000002",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:executor_started",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:executor_started",
+          "scenario": "executor_started",
+          "status": "success"
+        }
+      },
+      {
+        "node_id": "b00000000003",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:side_effect",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:side_effect",
+          "scenario": "side_effect",
+          "status": "success"
+        }
+      }
+    ],
+    "checkpoints": {
+      "omc:recovery-drill-20260815:iter_001:b00000000001:g1": 6,
+      "omc:recovery-drill-20260815:iter_001:b00000000002:g1": 6,
+      "omc:recovery-drill-20260815:iter_001:b00000000003:g1": 6
+    },
+    "memory_outbox": [
+      {
+        "event_id": "memory-b00000000001",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000001",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "scenario": "dispatch",
+          "status": "candidate"
+        }
+      },
+      {
+        "event_id": "memory-b00000000002",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000002",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "scenario": "executor_started",
+          "status": "candidate"
+        }
+      },
+      {
+        "event_id": "memory-b00000000003",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000003",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "scenario": "side_effect",
+          "status": "candidate"
+        }
+      }
+    ],
+    "tree": {
+      "project_id": "recovery-drill-20260815/iter_001",
+      "mode": "standard",
+      "workflow_contract_version": 2,
+      "root_id": "a00000000001",
+      "parent_children": [
+        "b00000000001",
+        "b00000000002",
+        "b00000000003"
+      ],
+      "nodes": {
+        "dispatch": {
+          "node_id": "b00000000001",
+          "status": "accepted",
+          "task_key": "recovery-dispatch",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+            "executor_started": true,
+            "node_id": "b00000000001",
+            "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-dispatch",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:41.611978+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "dispatch",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000001:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:41.628317+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:41.643822+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "dispatch_intent:a00000000001:00006:recovery-dispatch",
+              "tool_ledger:b00000000001:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after dispatch recovery reconciliation."
+          }
+        },
+        "executor_started": {
+          "node_id": "b00000000002",
+          "status": "accepted",
+          "task_key": "recovery-executor_started",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+            "executor_started": true,
+            "node_id": "b00000000002",
+            "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-executor_started",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:42.479154+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "executor_started",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000002:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:43.218494+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:43.236103+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "dispatch_intent:a00000000001:00006:recovery-executor_started",
+              "tool_ledger:b00000000002:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after executor_started recovery reconciliation."
+          }
+        },
+        "side_effect": {
+          "node_id": "b00000000003",
+          "status": "accepted",
+          "task_key": "recovery-side_effect",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+            "executor_started": true,
+            "node_id": "b00000000003",
+            "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-side_effect",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:44.087662+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "side_effect",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000003:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:44.859299+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:44.877460+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "dispatch_intent:a00000000001:00006:recovery-side_effect",
+              "tool_ledger:b00000000003:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after side_effect recovery reconciliation."
+          }
+        }
+      }
+    }
+  },
+  "restored_snapshot": {
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "read_only_enforced": true,
+    "dispatch_intents": [
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-dispatch",
+        "node_id": "b00000000001",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:41.611978+08:00",
+          "node_id": "b00000000001",
+          "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-dispatch",
+          "tree_persisted": true
+        }
+      },
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-executor_started",
+        "node_id": "b00000000002",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:42.479154+08:00",
+          "node_id": "b00000000002",
+          "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-executor_started",
+          "tree_persisted": true
+        }
+      },
+      {
+        "parent_id": "a00000000001",
+        "employee_id": "00006",
+        "task_key": "recovery-side_effect",
+        "node_id": "b00000000003",
+        "state": "started",
+        "receipt": {
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "executor_started": true,
+          "executor_started_at": "2026-08-15T12:24:44.087662+08:00",
+          "node_id": "b00000000003",
+          "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+          "scheduler_registered": true,
+          "task_key": "recovery-side_effect",
+          "tree_persisted": true
+        }
+      }
+    ],
+    "tool_ledger": [
+      {
+        "node_id": "b00000000001",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:dispatch",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:dispatch",
+          "scenario": "dispatch",
+          "status": "success"
+        }
+      },
+      {
+        "node_id": "b00000000002",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:executor_started",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:executor_started",
+          "scenario": "executor_started",
+          "status": "success"
+        }
+      },
+      {
+        "node_id": "b00000000003",
+        "generation": 1,
+        "tool_name": "recovery_business_side_effect",
+        "business_key": "idempotency_key:recovery:side_effect",
+        "status": "completed",
+        "result": {
+          "employee_id": "00006",
+          "external_count": 1,
+          "idempotency_key": "recovery:side_effect",
+          "scenario": "side_effect",
+          "status": "success"
+        }
+      }
+    ],
+    "checkpoints": {
+      "omc:recovery-drill-20260815:iter_001:b00000000001:g1": 6,
+      "omc:recovery-drill-20260815:iter_001:b00000000002:g1": 6,
+      "omc:recovery-drill-20260815:iter_001:b00000000003:g1": 6
+    },
+    "memory_outbox": [
+      {
+        "event_id": "memory-b00000000001",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000001",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "scenario": "dispatch",
+          "status": "candidate"
+        }
+      },
+      {
+        "event_id": "memory-b00000000002",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000002",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "scenario": "executor_started",
+          "status": "candidate"
+        }
+      },
+      {
+        "event_id": "memory-b00000000003",
+        "status": "pending",
+        "attempt": 0,
+        "payload": {
+          "event_type": "task_completed",
+          "source_project_id": "recovery-drill-20260815",
+          "source_iteration_id": "iter_001",
+          "source_node_id": "b00000000003",
+          "source_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "scenario": "side_effect",
+          "status": "candidate"
+        }
+      }
+    ],
+    "tree": {
+      "project_id": "recovery-drill-20260815/iter_001",
+      "mode": "standard",
+      "workflow_contract_version": 2,
+      "root_id": "a00000000001",
+      "parent_children": [
+        "b00000000001",
+        "b00000000002",
+        "b00000000003"
+      ],
+      "nodes": {
+        "dispatch": {
+          "node_id": "b00000000001",
+          "status": "accepted",
+          "task_key": "recovery-dispatch",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+            "executor_started": true,
+            "node_id": "b00000000001",
+            "recorded_at": "2026-08-15T12:24:40.881462+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-dispatch",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:41.611978+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "dispatch",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000001:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:41.628317+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:41.643822+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000001:g1",
+              "dispatch_intent:a00000000001:00006:recovery-dispatch",
+              "tool_ledger:b00000000001:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after dispatch recovery reconciliation."
+          }
+        },
+        "executor_started": {
+          "node_id": "b00000000002",
+          "status": "accepted",
+          "task_key": "recovery-executor_started",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+            "executor_started": true,
+            "node_id": "b00000000002",
+            "recorded_at": "2026-08-15T12:24:42.472927+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-executor_started",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:42.479154+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "executor_started",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000002:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:43.218494+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:43.236103+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000002:g1",
+              "dispatch_intent:a00000000001:00006:recovery-executor_started",
+              "tool_ledger:b00000000002:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after executor_started recovery reconciliation."
+          }
+        },
+        "side_effect": {
+          "node_id": "b00000000003",
+          "status": "accepted",
+          "task_key": "recovery-side_effect",
+          "execution_generation": 1,
+          "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+          "checkpoint_status": "completed",
+          "dispatch_verification": {
+            "checkpoint_thread_id": "omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+            "executor_started": true,
+            "node_id": "b00000000003",
+            "recorded_at": "2026-08-15T12:24:44.080866+08:00",
+            "scheduler_registered": true,
+            "task_key": "recovery-side_effect",
+            "tree_persisted": true,
+            "executor_started_at": "2026-08-15T12:24:44.087662+08:00"
+          },
+          "execution_checkpoint": {
+            "phase": "completed",
+            "scenario": "side_effect",
+            "dispatch_state": "started",
+            "executor_started": true,
+            "side_effects_confirmed": [
+              "ledger:b00000000003:recovery_business_side_effect"
+            ],
+            "external_count": 1,
+            "completed_at": "2026-08-15T12:24:44.859299+08:00"
+          },
+          "acceptance_audit": {
+            "decision": "accepted",
+            "decided_by": "00003",
+            "decided_via": "accept_child",
+            "review_node_id": "a00000000001",
+            "decided_at": "2026-08-15T12:24:44.877460+08:00",
+            "criteria_results": [
+              {
+                "criterion": "same checkpoint thread",
+                "passed": true
+              },
+              {
+                "criterion": "receipts and side effect exactly once",
+                "passed": true
+              }
+            ],
+            "evidence_refs": [
+              "checkpoint:omc:recovery-drill-20260815:iter_001:b00000000003:g1",
+              "dispatch_intent:a00000000001:00006:recovery-side_effect",
+              "tool_ledger:b00000000003:recovery_business_side_effect"
+            ],
+            "notes": "Explicitly accepted after side_effect recovery reconciliation."
+          }
+        }
+      }
+    }
+  },
+  "checks": {
+    "maintenance_window_isolated": true,
+    "new_standard_v2_iteration": true,
+    "three_process_crashes_observed": true,
+    "three_fresh_process_resumes_succeeded": true,
+    "same_checkpoint_threads_recovered": true,
+    "original_human_message_not_duplicated": true,
+    "dispatch_receipts_exactly_once": true,
+    "executor_started_receipts_exactly_once": true,
+    "side_effect_ledger_exactly_once": true,
+    "execution_generation_unchanged": true,
+    "all_checkpoint_threads_present": true,
+    "no_duplicate_children": true,
+    "explicit_acceptance_only": true,
+    "memory_outbox_preserved_pending": true,
+    "memory_source_refs_match_threads": true,
+    "online_backup_verified": true,
+    "restore_integrity_ok": true,
+    "restore_opened_read_only": true,
+    "restored_business_state_matches": true,
+    "formal_data_unchanged": true,
+    "formal_memory_outbox_not_consumed": true,
+    "credentials_not_persisted": true
+  },
+  "failed_checks": [],
+  "formal_before": {
+    "hashes": {
+      "runtime.sqlite3": "2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de",
+      "legacy_iter_009": "4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626",
+      "directory_iter_009": "b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab"
+    },
+    "outbox": {
+      "pending": 26,
+      "attempted": 0
+    }
+  },
+  "formal_after": {
+    "hashes": {
+      "runtime.sqlite3": "2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de",
+      "legacy_iter_009": "4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626",
+      "directory_iter_009": "b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab"
+    },
+    "outbox": {
+      "pending": 26,
+      "attempted": 0
+    }
+  },
+  "formal_outbox_touched": false,
+  "formal_24h_launch_allowed": false,
+  "post_gate_validation": {
+    "targeted": "21 passed in 11.45s",
+    "full_suite": "4708 passed, 5 skipped, 72 warnings in 175.04s",
+    "git_diff_check": "passed"
+  }
+}

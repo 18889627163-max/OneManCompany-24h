@@ -94,9 +94,9 @@
 | Memory Outbox/Review/Conflict 表 | 已有基础 schema | 实现 worker、ACL、状态机和管理接口 |
 | SQLite online backup | 已有基础实现和测试 | 加入保留策略、恢复演练和自动化 |
 | `sqlite-vec` 运行依赖 | ARM64 隔离环境已实际加载 `v0.1.9` 并完成向量写入/检索 | 已用本地 Ollama 完成真实 endpoint/model/dimension、向量写入和检索 Gate |
-| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL、混合检索和 versioned shadow reindex 已实现并隔离演练 | 真实 Ollama Gate 已完成；继续正式 worker 故障恢复和让位演练 |
+| 长期记忆基础 Store | `AsyncSqliteStore`、Memory Record、ACL、混合检索和 versioned shadow reindex 已实现并隔离演练 | 真实 Ollama、故障恢复和 Provider 让位 Gate 已完成 |
 | 长期记忆检索工具 | `search_memory`、`propose_memory` 已实现并按 runtime identity 授权 | 完成真实项目成员和 prompt budget 演练 |
-| Memory worker | durable Memory Outbox worker 已接入 lifespan | 验证真实 embedding pending/backoff 和 Provider 让位 |
+| Memory worker | durable Memory Outbox worker 已接入 lifespan；pending/holding/backoff/恢复补向量和聊天 Agent Provider 让位均已通过隔离 Gate | 正式 26 条 outbox 继续保持未消费 |
 | 管理 API/CLI/前端状态 | 管理 API 与 CLI 已实现；health 状态已接入 | 补齐并实测全部前端 attention/holding 展示 |
 
 ### 2.3 2026-08-14 实施进度快照
@@ -121,20 +121,20 @@
 - embedding model、dimensions、text fields 和 Provider endpoint fingerprint 已纳入 index identity，同版本漂移 fail closed；
 - 测试误触正式 Runtime SQLite 的根因已修复：相对数据库路径跟随 `OMC_DATA_ROOT`、unit lifespan 使用 `tmp_path`、pytest 直接访问正式库 fail closed；
 - 测试员工目录隔离已补齐：`config/store/memory_service` 的 active 与 ex-employee 路径均重定向到每测试 `tmp_path`，解雇流程测试不再写入正式历史员工目录；
-- 最终全量测试达到 `4693 passed, 5 skipped, 73 warnings`；测试前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和 `iter_009` 的 SHA-256、大小与 mtime 均不变；
+- 最终全量测试达到 `4708 passed, 5 skipped, 72 warnings`；本轮 Gate 前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和当前磁盘 `iter_009` 的 SHA-256 均不变；
 - recovery tests 全部使用临时 `OMC_DATA_ROOT`；当前正式服务并发写入单独记为 live-service activity，不做危险回滚；
 - RuntimeStorage 只读对账已完成：7 条 finding 均为旧 `_sys_automation_*` adhoc thread 假 orphan，正式 actionable finding 为 0；Memory Outbox 当前 26 条均为 `pending/attempt=0`，未删除、未消费、未重放；
 - health/API/CLI 已区分 actionable checkpoint finding 与 legacy system orphan，future reconciler 同时排除新旧 system/adhoc thread；
-- `iter_009.yaml` 当前受保护文件哈希为 `4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626`，本次只读对账前后未变化。
+- legacy `iterations/iter_009.yaml` 哈希为 `4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626`，目录化 `iterations/iter_009/task_tree.yaml` 哈希为 `b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab`；两个不同文件在本轮 Gate 前后均未变化。
 
 #### 2.3.2 尚未完成的上线阻塞项
 
-- 全新专用 standard v2 演练 iteration 上的真实后端停止/重启和同 thread resume；
-- dispatch、executor started、业务 side-effect 三个阶段的真实 receipt/ledger 故障注入；
-- 受控真实云 Provider HTTP 429、长 backoff、优先级竞争和恢复 UI；
-- 本地 Ollama Embedding Gate 已通过；正式 worker pending/backoff 和 Provider 让位仍待验证；
-- 独立恢复后的真实 TaskTree/checkpoint/receipt/acceptance 只读对账；
-- 24 小时墙钟、真机 smoke、FFmpeg/FFprobe 证据；
+- 隔离维护窗口中的全新 standard v2 三阶段服务进程退出/恢复已通过；未停止正式业务实例；
+- dispatch、executor started、业务 side-effect 三个阶段的 receipt/ledger 故障注入已通过；
+- legacy `iter_009.yaml` 与目录化 `iter_009/task_tree.yaml` 已分别建立哈希基线，本轮前后同时保持不变；
+- 本地 Ollama Embedding、worker pending/backoff/recovery 和 Provider 让位 Gate 均已通过；
+- Online Backup 到独立 data root 的 TaskTree/checkpoint/receipt/ledger/outbox/acceptance 只读对账已通过；
+- 仍缺少 24 小时墙钟、真机 smoke、FFmpeg/FFprobe 证据和最终四人 standard v2 正式复验；
 - 全新 standard v2 iteration 的四人正式复验与显式验收。
 
 **当前结论：** P0 和隔离 Recovery Gate 已通过，但 `formal_24h_launch_allowed=false`。不得把隔离 subprocess、隔离服务或单元测试结果写成正式业务上线。
@@ -1153,7 +1153,7 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 7. embedding 不可用时 pending + 结构化降级；
 8. 实现 versioned reindex 和原子切换。
 
-当前状态：1—8 的代码和隔离 Gate 已完成；真实云 endpoint/model/dimension 探针、正式 Memory worker backlog 补向量和 Provider 让位仍待受控演练。当前实现使用同一 Runtime SQLite 内的 `memory_vector_versions` shadow rows 原子切换，不创建独立 `memory-vN.sqlite3`。
+当前状态：1—8 的代码和隔离 Gate 已完成；本地 Ollama endpoint/model/dimension、真实向量检索、Memory worker pending/holding/backoff/恢复补向量以及聊天 Agent Provider 让位均已通过。正式 26 条 outbox 仍不得消费。当前实现使用同一 Runtime SQLite 内的 `memory_vector_versions` shadow rows 原子切换，不创建独立 `memory-vN.sqlite3`。
 
 退出条件：关闭 embedding 服务后正式任务仍完成；恢复后 backlog 自动补齐且无重复 memory。
 
@@ -1318,7 +1318,7 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 - WP-06 一致性在线备份通过 integrity、secret scan 和 manifest 验证；
 - WP-07 至少一次独立目录恢复、对账、切换和回滚演练通过；
 - WP-08 在真实隔离服务上生成无 blocking failure 的 verify report；
-- ProviderGateway 覆盖全部真实模型调用，并完成受控真实云 429/并发恢复演练；
+- ProviderGateway 覆盖全部真实模型调用，并完成受控真实聊天 Provider 429/并发恢复演练；
 - dispatch、started、accept/reject 均有 durable receipt/audit；
 - RuntimeStorage、Saver、Store 已进入 FastAPI 生命周期；
 - SQLite 单机边界、单实例锁和 WAL/磁盘策略已验证；
@@ -1355,7 +1355,7 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 11. 隔离 subprocess crash/resume、副作用防重放和模拟 Provider 429 holding/resume；
 12. sqlite-vec `v0.1.9`、混合检索、versioned shadow reindex、失败结构化降级和 outbox 保持 pending 的隔离 Gate；
 13. 测试 Runtime SQLite 隔离修复与回归保护；
-14. 全量测试 `4693 passed, 5 skipped`，P0 与 Recovery Gate 均通过。
+14. 全量测试 `4708 passed, 5 skipped, 72 warnings`，P0、Recovery、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 均通过。
 
 ### 已完成 P1：运行告警与历史数据治理
 
@@ -1368,22 +1368,22 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 5. 先扩展一致性备份覆盖 ex/quarantine，再隔离非法历史 profile；
 6. 正式 `employees/00010` 和 `iter_009` 在维护前后哈希必须保持不变。
 
-### 下一组 P1：真实长期记忆与 Provider Gate
+### 已完成 P1：真实长期记忆与 Provider Gate
 
 1. 已配置本机 loopback Ollama `0.32.12` + `embeddinggemma`，在全新临时 `OMC_DATA_ROOT` 完成 endpoint/model/768 维探针；LangChain 已固定字符串输入兼容模式；
 2. 已使用真实本地模型返回验证 namespace/status 先过滤、向量检索、去重重排和 Prompt budget；
-3. 验证真实 embedding 故障下的 pending 补向量和 memory worker Provider 让位；
+3. 已验证真实 Ollama 恢复路径下的 pending/holding/backoff 和同 memory 补向量，并验证 memory worker 在正式聊天任务运行时自动让出 Provider 槽位；
 4. 经审批后才允许在正式 Runtime SQLite 注册目标 index version；正式 26 条 outbox 不得直接消费；
-5. 使用受控真实聊天 Provider 执行低风险 429/并发限制演练，验证 TaskNode holding、durable backoff、优先级和恢复 UI。
+5. 已使用 loopback OpenAI-compatible endpoint 和真实 ChatOpenAI HTTP 客户端完成 429/并发恢复演练，验证 TaskNode holding、durable backoff、优先级、同 thread 恢复和恢复 UI；机器报告见 `reports/REAL-PROVIDER-429-GATE-REPORT.json`。
 
-### 下一组 P1：真实服务恢复与独立对账
+### 已完成 P1：真实服务恢复与独立对账
 
-1. 申请安全维护窗口，不擅自停止当前正在运行的正式后端；
-2. 创建全新专用 standard v2 恢复演练 iteration，禁止使用 `iter_009`；
-3. 在 dispatch、executor started 和业务 side-effect 后分别注入服务退出；
-4. 验证同一 checkpoint thread resume、execution generation/fencing、receipt 和副作用防重放；
-5. 将在线备份恢复到全新 data root，对 TaskTree/checkpoint/store/outbox/dispatch/acceptance 做只读对账；
-6. 对当前 live-service activity 与测试产物分别审计，不使用旧快照覆盖真实业务记录。
+1. 建立隔离安全维护窗口，明确禁止停止正式服务和写入正式 `.onemancompany`；维护前后同时核对 legacy `iter_009.yaml` 与目录化 `iter_009/task_tree.yaml`；
+2. 在全新临时 data root 创建专用 `recovery-drill-20260815/iter_001` standard v2 iteration，未使用 `iter_009`；
+3. 在 dispatch、executor started 和业务 side-effect durable boundary 后分别以退出码 87 注入服务进程退出；
+4. 三次均由全新进程沿同一 checkpoint thread 恢复，execution generation 保持 1，dispatch/started/ledger/外部副作用/HumanMessage 均未重复；
+5. 使用 SQLite Online Backup API 将一致性镜像恢复到独立 data root，并以 `mode=ro` 完成 TaskTree/checkpoint/outbox/dispatch/ledger/acceptance/source refs 对账；
+6. 正式 Runtime SQLite、两份受保护 `iter_009` 和 26 条正式 Memory Outbox 前后不变；机器报告和审计见 `reports/REAL-SERVICE-RECOVERY-GATE-REPORT.json` 与 `reports/REAL-SERVICE-RECOVERY-GATE-20260815.md`。
 
 ### P2：运营验收
 

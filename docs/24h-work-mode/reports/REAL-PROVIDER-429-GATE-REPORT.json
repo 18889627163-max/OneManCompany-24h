@@ -1,0 +1,182 @@
+{
+  "status": "passed",
+  "gate": "real-provider-http-429-recovery",
+  "started_at": "2026-08-14T20:23:45.307734+00:00",
+  "completed_at": "2026-08-14T20:23:47.738931+00:00",
+  "data_root": "/private/var/folders/dy/kgsk8ztj1nsdd8crjsh2gw3w0000gn/T/omc-provider-429-gate-hft48c0_",
+  "endpoint": "isolated-loopback-openai-compatible",
+  "formal_outbox_touched": false,
+  "result": {
+    "checks": {
+      "real_chat_http_429_observed": true,
+      "tasknode_stayed_holding": true,
+      "attempt_and_retry_persisted_across_restart": true,
+      "formal_task_precedes_memory": true,
+      "memory_worker_yielded_provider_slot": true,
+      "same_checkpoint_thread_recovered": true,
+      "provider_request_reused_and_completed": true,
+      "dispatch_not_duplicated": true,
+      "side_effect_not_duplicated": true,
+      "original_human_message_not_duplicated": true,
+      "recovery_ui_fields_visible": true,
+      "recovery_ui_cleared": true,
+      "holding_and_recovery_audited": true,
+      "credentials_not_persisted": true,
+      "formal_data_unchanged": true,
+      "formal_memory_outbox_not_consumed": true
+    },
+    "failed_checks": [],
+    "hold": {
+      "phase": "hold",
+      "thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+      "provider_exception_type": "RateLimitError",
+      "snapshot": {
+        "node": {
+          "status": "holding",
+          "hold_reason": "provider_capacity",
+          "checkpoint_status": "waiting_provider",
+          "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "execution_checkpoint": {
+            "phase": "waiting_provider_capacity",
+            "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+            "side_effects_confirmed": [],
+            "provider_attempt": 1,
+            "next_retry_at": "2026-08-14T20:23:47.200960+00:00"
+          }
+        },
+        "provider": {
+          "request_id": "chat:195d5f236f6c920762b7a13dbb99f8b330041ae3",
+          "status": "holding",
+          "attempt": 1,
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "last_error_class": "transient",
+          "priority": 0
+        },
+        "retry": {
+          "attempt": 1,
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "last_error_class": "transient"
+        },
+        "dispatch_count": 1,
+        "tool_ledger_count": 1,
+        "checkpoint_count": 3
+      },
+      "side_effect_counter": 1
+    },
+    "resume": {
+      "phase": "resume",
+      "thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+      "before_resume": {
+        "node": {
+          "status": "holding",
+          "hold_reason": "provider_capacity",
+          "checkpoint_status": "waiting_provider",
+          "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "execution_checkpoint": {
+            "phase": "waiting_provider_capacity",
+            "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+            "side_effects_confirmed": [],
+            "provider_attempt": 1,
+            "next_retry_at": "2026-08-14T20:23:47.200960+00:00"
+          }
+        },
+        "provider": {
+          "request_id": "chat:195d5f236f6c920762b7a13dbb99f8b330041ae3",
+          "status": "holding",
+          "attempt": 1,
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "last_error_class": "transient",
+          "priority": 0
+        },
+        "retry": {
+          "attempt": 1,
+          "next_retry_at": "2026-08-14T20:23:47.200960+00:00",
+          "last_error_class": "transient"
+        },
+        "dispatch_count": 1,
+        "tool_ledger_count": 1,
+        "checkpoint_count": 3
+      },
+      "checkpoint_before": true,
+      "human_messages": 1,
+      "assistant_messages": 2,
+      "snapshot": {
+        "node": {
+          "status": "processing",
+          "hold_reason": "",
+          "checkpoint_status": "active",
+          "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+          "next_retry_at": "",
+          "execution_checkpoint": {
+            "phase": "provider_capacity_recovered",
+            "checkpoint_thread_id": "omc:provider-gate:iter_001:provider-gate-node:g1",
+            "side_effects_confirmed": [],
+            "provider_attempt": 1,
+            "next_retry_at": null
+          }
+        },
+        "provider": {
+          "request_id": "chat:195d5f236f6c920762b7a13dbb99f8b330041ae3",
+          "status": "completed",
+          "attempt": 1,
+          "next_retry_at": null,
+          "last_error_class": null,
+          "priority": 0
+        },
+        "retry": {
+          "attempt": 1,
+          "next_retry_at": null,
+          "last_error_class": null
+        },
+        "dispatch_count": 1,
+        "tool_ledger_count": 1,
+        "checkpoint_count": 4
+      },
+      "side_effect_counter": 1
+    },
+    "priority": {
+      "memory_withheld_while_business_active": true,
+      "business_result": {
+        "status": "business-complete"
+      },
+      "memory_result": {
+        "status": "memory-complete"
+      },
+      "metrics_while_business": {
+        "running": 1,
+        "queued": 0,
+        "oldest_queue_at": null
+      },
+      "request_order": [
+        "chat:holding",
+        "chat:success",
+        "priority:business:start",
+        "priority:business:end",
+        "priority:memory:start"
+      ]
+    },
+    "isolated_database": {
+      "outbox_count": 0,
+      "provider_request_count": 3,
+      "provider_audit_count": 2,
+      "api_key_not_persisted": true
+    },
+    "chat_http_attempts": 2,
+    "formal_hashes_before": {
+      "runtime_sqlite": "2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de",
+      "legacy_iter_009_yaml": "4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626",
+      "iter_009_task_tree": "b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab",
+      "active_employee_00010": "2acc362d7e62228c86b25ba55a19660ee27ead33ba706c94218325ec43a510b6",
+      "archived_employee_00010": "80e09030ebfbd6bc39fde3f023311e8adc4a394b0caaf350678e1b4ad13c3a4d"
+    },
+    "formal_hashes_after": {
+      "runtime_sqlite": "2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de",
+      "legacy_iter_009_yaml": "4c8cdb0b84aa5f780ce1c589a504fca8bb2f545093a03e74895b7acfaaa58626",
+      "iter_009_task_tree": "b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab",
+      "active_employee_00010": "2acc362d7e62228c86b25ba55a19660ee27ead33ba706c94218325ec43a510b6",
+      "archived_employee_00010": "80e09030ebfbd6bc39fde3f023311e8adc4a394b0caaf350678e1b4ad13c3a4d"
+    }
+  }
+}

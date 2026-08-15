@@ -188,6 +188,14 @@ async def _runtime_health_payload(request: Request) -> dict:
     }
     if storage_healthy and memory_enabled:
         memory_index = await storage.memory_index_status()
+        if memory_index.get("embedding_available"):
+            embedding_status = "healthy"
+        elif memory_index.get("vector_configured"):
+            embedding_status = "degraded"
+        if memory_index.get("vector_enabled"):
+            vector_status = "healthy"
+        elif memory_index.get("vector_configured"):
+            vector_status = "unavailable"
 
     reconciliation = {
         "memory_outbox_backlog": 0,
@@ -257,9 +265,19 @@ async def admin_memory_status(request: Request) -> dict:
     storage = request.app.state.runtime_storage
     result = await storage.memory_index_status()
     reconciliation = await runtime_reconciliation_health(storage)
+    embedding_status = str(getattr(request.app.state, "memory_embedding_status", "degraded"))
+    vector_status = str(getattr(request.app.state, "memory_vector_status", "unavailable"))
+    if result.get("embedding_available"):
+        embedding_status = "healthy"
+    elif result.get("vector_configured"):
+        embedding_status = "degraded"
+    if result.get("vector_enabled"):
+        vector_status = "healthy"
+    elif result.get("vector_configured"):
+        vector_status = "unavailable"
     result.update({
-        "embedding": str(getattr(request.app.state, "memory_embedding_status", "degraded")),
-        "sqlite_vec": str(getattr(request.app.state, "memory_vector_status", "unavailable")),
+        "embedding": embedding_status,
+        "sqlite_vec": vector_status,
         "memory_worker_backlog": int(reconciliation["memory_outbox_backlog"]),
         "oldest_memory_event_at": reconciliation["oldest_memory_event_at"],
     })

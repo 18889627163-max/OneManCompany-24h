@@ -23,6 +23,25 @@ function normalizeTaskStats(tasks) {
   }, { running: 0, queued: 0, awaiting: 0, blocked: 0 });
 }
 
+function taskAttentionLabel(task) {
+  if (!task) return '';
+  const reason = task.hold_reason || '';
+  const checkpoint = task.checkpoint_status || '';
+  if (reason === 'provider_capacity' || reason === 'provider_transient_error') {
+    return '等待模型容量';
+  }
+  if (reason === 'memory_backend_unavailable' || reason === 'runtime_storage_unavailable') {
+    return '等待记忆数据库';
+  }
+  if (checkpoint === 'recovering' || checkpoint === 'waiting_for_checkpoint') {
+    return '正在恢复上下文';
+  }
+  if (reason === 'checkpoint_missing_controlled_recovery') {
+    return '等待人工恢复';
+  }
+  return '';
+}
+
 class AppController {
   constructor() {
     this.ws = null;
@@ -1945,6 +1964,11 @@ class AppController {
       }
       html += `</div>`;
       html += `<div class="emp-taskboard-desc">${this._escHtml(task.description_preview || task.description || '')}</div>`;
+      const attentionLabel = taskAttentionLabel(task);
+      if (attentionLabel) {
+        const retryText = task.next_retry_at ? ` · ${this._escHtml(task.next_retry_at)}` : '';
+        html += `<div class="emp-taskboard-attention">${attentionLabel}${retryText}</div>`;
+      }
       if (task.result) {
         html += `<div class="emp-taskboard-result">${this._escHtml(task.result)}</div>`;
       }
@@ -1972,6 +1996,20 @@ class AppController {
       existing.className = `emp-taskboard-item ${(task.status || '').replace('_', '-')}`;
       const descEl = existing.querySelector('.emp-taskboard-desc');
       if (descEl) descEl.textContent = task.description_preview || task.description || '';
+      const attentionLabel = taskAttentionLabel(task);
+      let attentionEl = existing.querySelector('.emp-taskboard-attention');
+      if (attentionLabel) {
+        if (!attentionEl) {
+          attentionEl = document.createElement('div');
+          attentionEl.className = 'emp-taskboard-attention';
+          existing.appendChild(attentionEl);
+        }
+        attentionEl.textContent = task.next_retry_at
+          ? `${attentionLabel} · ${task.next_retry_at}`
+          : attentionLabel;
+      } else if (attentionEl) {
+        attentionEl.remove();
+      }
       const resultEl = existing.querySelector('.emp-taskboard-result');
       if (task.result) {
         if (resultEl) {

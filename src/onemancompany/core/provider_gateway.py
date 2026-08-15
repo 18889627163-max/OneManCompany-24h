@@ -120,6 +120,8 @@ class ProviderGateway:
         self._metric_lock = asyncio.Lock()
         self._running = 0
         self._queued = 0
+        self._running_by_priority: dict[int, int] = {}
+        self._queued_by_priority: dict[int, int] = {}
 
     async def start(self) -> None:
         self._started = True
@@ -176,20 +178,33 @@ class ProviderGateway:
         while True:
             async with self._metric_lock:
                 self._queued += 1
+                priority_value = int(priority)
+                self._queued_by_priority[priority_value] = (
+                    self._queued_by_priority.get(priority_value, 0) + 1
+                )
             await limiter.acquire(int(priority))
             async with self._metric_lock:
                 self._queued = max(0, self._queued - 1)
+                self._queued_by_priority[priority_value] = max(
+                    0, self._queued_by_priority.get(priority_value, 0) - 1
+                )
                 self._running += 1
+                self._running_by_priority[priority_value] = (
+                    self._running_by_priority.get(priority_value, 0) + 1
+                )
             try:
                 await self.storage.execute(
                     "UPDATE provider_queue SET status='running',attempt=?,started_at=? WHERE request_id=?",
                     (attempt, iso_now(), request_id),
                 )
                 result = await invoke()
-                await self.storage.execute(
-                    "UPDATE provider_queue SET status='completed',completed_at=?,next_retry_at=NULL,last_error=NULL,last_error_class=NULL WHERE request_id=?",
-                    (iso_now(), request_id),
-                )
+                await self._mark_completed(request_id, attempt)
+                if attempt > 0:
+                    callback = context.get("on_recovered")
+                    if callback:
+                        maybe = callback(attempt)
+                        if asyncio.iscoroutine(maybe):
+                            await maybe
                 return result
             except BaseException as error:
                 if isinstance(error, asyncio.CancelledError):
@@ -220,14 +235,38 @@ class ProviderGateway:
                     maybe = callback(attempt, next_retry, str(error))
                     if asyncio.iscoroutine(maybe):
                         await maybe
-                if self.transient_retry_limit_for_call is not None and attempt > self.transient_retry_limit_for_call:
+                retry_limit = context.get(
+                    "transient_retry_limit_for_call",
+                    self.transient_retry_limit_for_call,
+                )
+                if retry_limit is not None and attempt > int(retry_limit):
                     raise
             finally:
                 async with self._metric_lock:
                     self._running = max(0, self._running - 1)
+                    self._running_by_priority[priority_value] = max(
+                        0, self._running_by_priority.get(priority_value, 0) - 1
+                    )
                 await limiter.release()
             await asyncio.sleep(delay)
             await self.storage.execute("UPDATE provider_queue SET status='queued' WHERE request_id=?", (request_id,))
+
+    async def _mark_completed(self, request_id: str, attempt: int) -> None:
+        """Atomically clear active retry timing while preserving attempt history."""
+        now = iso_now()
+        async with self.storage._write_lock:
+            await self.storage.conn.execute(
+                "UPDATE provider_queue SET status='completed',completed_at=?,next_retry_at=NULL,"
+                "last_error=NULL,last_error_class=NULL WHERE request_id=?",
+                (now, request_id),
+            )
+            if attempt > 0:
+                await self.storage.conn.execute(
+                    "UPDATE provider_retry_state SET attempt=?,next_retry_at=NULL,last_error_class=NULL,"
+                    "last_error=NULL,updated_at=? WHERE request_id=?",
+                    (attempt, now, request_id),
+                )
+            await self.storage.conn.commit()
 
     async def _record_error(
         self, request_id: str, attempt: int, disposition: ErrorDisposition,
@@ -252,6 +291,32 @@ class ProviderGateway:
 
     async def health_check(self) -> bool:
         return self._started and await self.storage.health_check()
+
+    async def wait_for_background_turn(
+        self,
+        priority: ProviderPriority = ProviderPriority.MEMORY,
+        *,
+        poll_interval: float = 0.01,
+    ) -> None:
+        """Wait until no higher-priority provider work is queued or running.
+
+        Provider calls cannot be safely pre-empted once sent. Background workers
+        therefore check this admission gate before starting each external call;
+        any business/recovery demand already visible to the gateway goes first.
+        """
+        threshold = int(priority)
+        while True:
+            async with self._metric_lock:
+                higher_priority_active = any(
+                    value > 0 and queued_priority < threshold
+                    for queued_priority, value in self._queued_by_priority.items()
+                ) or any(
+                    value > 0 and running_priority < threshold
+                    for running_priority, value in self._running_by_priority.items()
+                )
+            if not higher_priority_active:
+                return
+            await asyncio.sleep(max(0.001, float(poll_interval)))
 
     async def metrics(self) -> dict[str, Any]:
         async with self._metric_lock:

@@ -47,6 +47,9 @@ class TaskEntry:
     current_owner: str = ""  # employee_id of current owner
     status: str = TaskPhase.PENDING.value  # follows TaskPhase values
     result: str = ""       # task output / report on completion
+    hold_reason: str = ""
+    checkpoint_status: str = ""
+    next_retry_at: str = ""
     created_at: str = ""
     completed_at: str = ""
 
@@ -69,6 +72,9 @@ class TaskEntry:
             "current_owner": self.current_owner,
             "status": self.status,
             "result": self.result,
+            "hold_reason": self.hold_reason,
+            "checkpoint_status": self.checkpoint_status,
+            "next_retry_at": self.next_retry_at,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
         }
@@ -135,6 +141,9 @@ def get_active_tasks() -> list[TaskEntry]:
                     current_owner=employee_id,
                     status=node.status,
                     result=node.result or "",
+                    hold_reason=node.hold_reason or "",
+                    checkpoint_status=node.checkpoint_status or "",
+                    next_retry_at=node.next_retry_at or "",
                     created_at=node.created_at or "",
                     completed_at=node.completed_at or "",
                 ))

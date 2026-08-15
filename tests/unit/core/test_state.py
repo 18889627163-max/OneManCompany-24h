@@ -391,6 +391,9 @@ class TestGetActiveTasks:
             node.project_dir = str(tree_path.parent)
             node.status = status
             node.result = ""
+            node.hold_reason = "provider_capacity" if status == "holding" else ""
+            node.checkpoint_status = "waiting_provider" if status == "holding" else "active"
+            node.next_retry_at = "2026-08-14T12:00:30+08:00" if status == "holding" else ""
             node.created_at = "2026-08-12T12:00:00"
             node.completed_at = ""
             nodes[node_id] = node
@@ -416,8 +419,15 @@ class TestGetActiveTasks:
         assert all(task.parent_id == "parent000001" for task in tasks)
         assert all(task.tree_path == str(tree_path) for task in tasks)
         assert all(task.iteration_id == "iter_005" for task in tasks)
+        held_task = next(task for task in tasks if task.status == "holding")
+        assert held_task.hold_reason == "provider_capacity"
+        assert held_task.checkpoint_status == "waiting_provider"
+        assert held_task.next_retry_at == "2026-08-14T12:00:30+08:00"
         payload = tasks[0].to_dict()
-        assert {"node_id", "parent_id", "tree_path", "iteration_id"} <= payload.keys()
+        assert {
+            "node_id", "parent_id", "tree_path", "iteration_id",
+            "hold_reason", "checkpoint_status", "next_retry_at",
+        } <= payload.keys()
 
 class TestWorkflowV2StatusPolicy:
     def test_parse_task_phase_rejects_empty_unknown_and_wrong_case(self):

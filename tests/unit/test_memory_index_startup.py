@@ -73,7 +73,9 @@ async def test_prepare_memory_index_degrades_when_probe_fails(monkeypatch):
 
     index, embedding_status, vector_status = await _prepare_memory_index(_settings())
 
-    assert index is None
+    assert index is not None
+    assert index["provider_available"] is False
+    assert index["dims"] == 4
     assert embedding_status == "degraded"
     assert vector_status == "unavailable"
 

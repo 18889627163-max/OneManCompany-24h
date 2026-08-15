@@ -1159,6 +1159,7 @@ class EmployeeManager:
         recoverable_holds = {
             "runtime_storage_unavailable",
             "provider_transient_error",
+            "provider_capacity",
             "execution_lease_unavailable",
         }
         for entry in self._schedule.get(employee_id, []):
@@ -1756,6 +1757,23 @@ class EmployeeManager:
         with get_tree_lock(tree_path):
             tree.save(Path(tree_path))
 
+    @staticmethod
+    def _provider_task_callbacks(
+        *, tree_path: str, node_id: str, checkpoint_thread_id: str, storage,
+    ) -> dict[str, Callable]:
+        from onemancompany.core.provider_task_state import ProviderTaskStateBridge
+
+        bridge = ProviderTaskStateBridge(
+            tree_path=tree_path,
+            node_id=node_id,
+            checkpoint_thread_id=checkpoint_thread_id,
+            storage=storage,
+        )
+        return {
+            "on_holding": bridge.on_holding,
+            "on_recovered": bridge.on_recovered,
+        }
+
     async def _lease_heartbeat(self, storage, lease, *, interval_seconds: float = 20.0) -> None:
         try:
             while True:
@@ -1889,6 +1907,12 @@ class EmployeeManager:
             "tree_path": entry.tree_path,
             "checkpoint_resume": checkpoint_resume,
             "fencing_token": lease.fencing_token,
+            **self._provider_task_callbacks(
+                tree_path=entry.tree_path,
+                node_id=node.id,
+                checkpoint_thread_id=thread_id,
+                storage=storage,
+            ),
         })
         heartbeat = asyncio.create_task(self._lease_heartbeat(storage, lease))
         try:
@@ -2222,6 +2246,20 @@ class EmployeeManager:
 
         except asyncio.CancelledError:
             agent_error = True
+            from onemancompany.core.provider_task_state import PROVIDER_CAPACITY_HOLD_REASON
+            if (
+                runtime_storage is not None
+                and node.status == TaskPhase.HOLDING.value
+                and node.hold_reason == PROVIDER_CAPACITY_HOLD_REASON
+            ):
+                self._save_tree_now(tree, entry.tree_path)
+                logger.info(
+                    "[TASK LIFECYCLE] preserving provider HOLDING during shutdown "
+                    "employee={} node={}",
+                    employee_id,
+                    entry.node_id,
+                )
+                raise
             from onemancompany.core.task_lifecycle import safe_cancel as _sc
             _sc(node)
             logger.debug("[TASK LIFECYCLE] employee={} node={} → CANCELLED", employee_id, entry.node_id)
@@ -2262,11 +2300,13 @@ class EmployeeManager:
             )
             disposition = classify_provider_error(e) if runtime_storage is not None else ErrorDisposition.FATAL
             if disposition is ErrorDisposition.TRANSIENT:
-                node.set_status(TaskPhase.HOLDING)
-                node.hold_reason = "provider_transient_error"
-                node.hold_started_at = datetime.now().astimezone().isoformat()
-                node.checkpoint_status = "holding"
-                node.result = f"Provider temporarily unavailable: {e!s}"
+                from onemancompany.core.provider_task_state import PROVIDER_CAPACITY_HOLD_REASON
+                if node.hold_reason != PROVIDER_CAPACITY_HOLD_REASON:
+                    node.set_status(TaskPhase.HOLDING)
+                    node.hold_reason = "provider_transient_error"
+                    node.hold_started_at = datetime.now().astimezone().isoformat()
+                    node.checkpoint_status = "holding"
+                    node.result = "Provider temporarily unavailable; execution is holding"
                 logger.warning(
                     "[TASK LIFECYCLE] employee={} node={} → HOLDING (provider transient: {})",
                     employee_id, entry.node_id, e,
@@ -2602,6 +2642,7 @@ class EmployeeManager:
         durable_holds = {
             "runtime_storage_unavailable",
             "provider_transient_error",
+            "provider_capacity",
             "execution_lease_unavailable",
             "checkpoint_missing_controlled_recovery",
             "dispatch_reconciliation_required",

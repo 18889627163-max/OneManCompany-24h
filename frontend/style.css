@@ -4120,6 +4120,17 @@ h3.pixel-title { font-size: var(--text-label); }
   word-break: break-word;
 }
 
+.emp-taskboard-attention {
+  margin-top: 4px;
+  padding: 3px 5px;
+  border: 1px solid #8b5cf6;
+  color: #d8c7ff;
+  background: rgba(139, 92, 246, 0.12);
+  font-size: 8px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 .emp-taskboard-cost {
   color: var(--pixel-yellow);
   font-size: var(--text-micro);

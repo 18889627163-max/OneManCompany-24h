@@ -130,3 +130,63 @@ def test_real_embedding_gate_rejects_formal_data_root(tmp_path, embedding_server
     assert payload["status"] == "blocked"
     assert payload["formal_outbox_touched"] is False
     assert "formal .onemancompany" in payload["error"]
+
+
+def test_embedding_recovery_gate_holds_then_recovers_in_isolated_data_root(
+    tmp_path, embedding_server
+):
+    repo = Path(__file__).resolve().parents[2]
+    script = repo / "scripts/check-embedding-recovery-gate.py"
+    data_root = tmp_path / "isolated-recovery-data"
+    report = tmp_path / "recovery-report.json"
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--data-root", str(data_root), "--report", str(report)],
+        cwd=repo,
+        env=_gate_env(embedding_server),
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    payload = json.loads(report.read_text())
+    assert payload["status"] == "passed"
+    assert payload["formal_outbox_touched"] is False
+    checks = payload["result"]["checks"]
+    assert checks["failure_status_holding"] is True
+    assert checks["structured_memory_persisted"] is True
+    assert checks["recovery_status_completed"] is True
+    assert checks["same_memory_reused"] is True
+    assert checks["single_vector_record"] is True
+    assert "test-key-not-persisted" not in report.read_text()
+
+
+def test_embedding_recovery_gate_rejects_formal_data_root(tmp_path, embedding_server):
+    repo = Path(__file__).resolve().parents[2]
+    script = repo / "scripts/check-embedding-recovery-gate.py"
+    report = tmp_path / "recovery-report.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--data-root",
+            str(repo / ".onemancompany"),
+            "--report",
+            str(report),
+        ],
+        cwd=repo,
+        env=_gate_env(embedding_server),
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    payload = json.loads(report.read_text())
+    assert payload["status"] == "blocked"
+    assert payload["formal_outbox_touched"] is False
+    assert "formal .onemancompany" in payload["error"]

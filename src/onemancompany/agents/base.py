@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import datetime, timezone
+import hashlib
+import json
 import time
 from loguru import logger
 from typing import Any, Sequence
@@ -70,6 +72,35 @@ _COMPANY_HOSTING = HostingMode.COMPANY.value
 _STREAM_HEARTBEAT_INTERVAL_SEC = 20.0
 
 
+def _durable_chat_request_id(context: dict[str, Any], messages: list[BaseMessage]) -> str | None:
+    """Return a restart-stable ID for one checkpointed model turn.
+
+    Only formal/checkpointed executions get deterministic IDs. Ad-hoc chat keeps
+    the gateway's random request IDs so repeated identical user messages remain
+    independent requests. The prompt itself is never persisted in provider_queue.
+    """
+    thread_id = str(context.get("checkpoint_thread_id") or "")
+    if not thread_id:
+        return None
+    serialized = []
+    for message in messages:
+        try:
+            serialized.append(message.model_dump(mode="json"))
+        except Exception:
+            serialized.append({
+                "type": type(message).__name__,
+                "content": getattr(message, "content", ""),
+            })
+    payload = json.dumps(
+        {"thread_id": thread_id, "messages": serialized},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return f"chat:{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:40]}"
+
+
 class GatewayChatModel(BaseChatModel):
     """BaseChatModel adapter that acquires a ProviderGateway permit per call.
 
@@ -128,6 +159,9 @@ class GatewayChatModel(BaseChatModel):
         else:
             context = dict(self.provider_context)
             context.update(get_task_runtime_context())
+            context.setdefault("request_id", _durable_chat_request_id(context, messages))
+            if context.get("request_id") is None:
+                context.pop("request_id", None)
             response = await gateway.invoke(
                 context=context,
                 priority=ProviderPriority(self.priority),

@@ -87,3 +87,40 @@ async def test_gateway_chat_model_uses_task_runtime_node_context(tmp_path):
         set_provider_gateway(None)
         await gateway.stop()
         await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_gateway_chat_model_reuses_durable_request_id_for_same_checkpoint_turn(tmp_path):
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize()
+    gateway = ProviderGateway(storage, default_concurrency=1)
+    await gateway.start()
+    set_provider_gateway(gateway)
+    delegate = CountingChatModel(lock=asyncio.Lock())
+    model = GatewayChatModel(
+        delegate=delegate,
+        provider_context={
+            "provider": "test",
+            "credential_fingerprint": "hash",
+            "account_or_model_pool": "pool",
+        },
+    )
+    token = set_task_runtime_context({
+        "node_id": "node-123",
+        "checkpoint_thread_id": "omc:project:iter_001:node-123:g1",
+    })
+    try:
+        messages = [HumanMessage(content="resume this exact model turn")]
+        await model.ainvoke(messages)
+        await model.ainvoke(messages)
+        rows = await storage.fetchall(
+            "SELECT request_id,node_id,status FROM provider_queue ORDER BY submitted_at"
+        )
+        assert len(rows) == 1
+        assert rows[0][1:] == ("node-123", "completed")
+        assert rows[0][0].startswith("chat:")
+    finally:
+        reset_task_runtime_context(token)
+        set_provider_gateway(None)
+        await gateway.stop()
+        await storage.close()

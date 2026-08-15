@@ -1,0 +1,74 @@
+{
+  "gate": "real_embedding_recovery_isolated",
+  "checked_date": "2026-08-14",
+  "started_at": "2026-08-14T19:41:30.731175+00:00",
+  "formal_data_root": "/Users/hanzhen/Downloads/OneManCompany-main/.onemancompany",
+  "formal_outbox_touched": false,
+  "formal_launch_allowed": false,
+  "fault_injection": "controlled_embedding_transport_outage",
+  "configuration": {
+    "provider_fingerprint": "9b514b1a65f6ebfaa4da53a116ea003831b044dc32a989733eace74554ef5b0c",
+    "model": "embeddinggemma",
+    "dimensions": 768,
+    "index_version": "v1"
+  },
+  "isolated_data_root": "/private/var/folders/dy/kgsk8ztj1nsdd8crjsh2gw3w0000gn/T/omc-embedding-recovery-gate-bq3jqmfo",
+  "result": {
+    "checks": {
+      "real_provider_probe_healthy": true,
+      "failure_status_holding": true,
+      "failure_attempt_recorded": true,
+      "failure_next_retry_recorded": true,
+      "failure_class_sanitized": true,
+      "structured_memory_persisted": true,
+      "no_vector_during_outage": true,
+      "recovery_status_completed": true,
+      "recovery_attempt_recorded": true,
+      "recovery_retry_state_cleared": true,
+      "same_memory_reused": true,
+      "embedding_marked_indexed": true,
+      "semantic_score_available": true,
+      "single_structured_record": true,
+      "single_vector_record": true,
+      "provider_health_recovered": true,
+      "formal_outbox_not_imported": true
+    },
+    "outbox_after_failure": {
+      "status": "holding",
+      "attempt": 1,
+      "next_retry_recorded": true,
+      "last_error": "ConnectionError"
+    },
+    "outbox_after_recovery": {
+      "status": "completed",
+      "attempt": 2,
+      "next_retry_at": null,
+      "last_error": null
+    },
+    "memory_id_reused": "97edfbd0-93bf-47a2-8aa8-9e602c8e7c99",
+    "vector_count_before": 0,
+    "vector_count_after": 1,
+    "store_count": 1,
+    "memory_index": {
+      "active_version": "v1",
+      "target_version": "v1",
+      "vector_configured": true,
+      "vector_enabled": true,
+      "embedding_available": true,
+      "reindex_required": false,
+      "versions": [
+        {
+          "index_version": "v1",
+          "dimensions": 768,
+          "embedding_model": "embeddinggemma",
+          "active": true,
+          "created_at": "2026-08-14T19:41:32.188134+00:00",
+          "activated_at": "2026-08-14T19:41:32.188134+00:00"
+        }
+      ]
+    },
+    "sqlite_integrity": "ok"
+  },
+  "status": "passed",
+  "completed_at": "2026-08-14T19:41:34.067635+00:00"
+}

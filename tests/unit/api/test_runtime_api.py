@@ -222,3 +222,36 @@ async def test_runtime_reconciliation_separates_legacy_system_orphans_and_redact
         assert health_data["checkpoint_legacy_system_orphans"] == 1
     finally:
         await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_tracks_embedding_recovery_from_storage(monkeypatch, tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    monkeypatch.setattr(config_mod.settings, "omc_memory_enabled", True)
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "health-test",
+        "provider_fingerprint": "local-test",
+        "provider_available": False,
+    })
+    try:
+        app = _app(storage)
+        app.state.memory_embedding_status = "degraded"
+        app.state.memory_vector_status = "unavailable"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            degraded = (await client.get("/api/health")).json()
+            storage.memory_embedding_available = True
+            storage.memory_vector_enabled = True
+            recovered = (await client.get("/api/health")).json()
+
+        assert degraded["embedding"] == "degraded"
+        assert degraded["sqlite_vec"] == "unavailable"
+        assert recovered["embedding"] == "healthy"
+        assert recovered["sqlite_vec"] == "healthy"
+    finally:
+        await storage.close()

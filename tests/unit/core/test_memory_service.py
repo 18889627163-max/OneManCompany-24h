@@ -242,7 +242,18 @@ async def test_retrieval_is_bounded_to_eight_and_six_thousand_characters(storage
 
 
 @pytest.mark.asyncio
-async def test_outbox_is_deduplicated_and_worker_is_restart_safe(storage):
+async def test_outbox_is_deduplicated_and_worker_is_restart_safe(tmp_path):
+    from langchain_core.embeddings import DeterministicFakeEmbedding
+
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize(memory_index={
+        "dims": 4,
+        "embed": DeterministicFakeEmbedding(size=4),
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "dedupe-test",
+        "provider_fingerprint": "local-test",
+    })
     payload = {
         "employee_id": "00008",
         "scope": "employee",
@@ -251,32 +262,35 @@ async def test_outbox_is_deduplicated_and_worker_is_restart_safe(storage):
         "text": "Recovered safely.",
         "source_node_id": "node-1",
     }
-    first = await storage.enqueue_memory_outbox(
-        namespace=("employee", "00008", "episodic"),
-        memory_key="node-1:episodic",
-        payload=payload,
-        event_id="event-1",
-    )
-    second = await storage.enqueue_memory_outbox(
-        namespace=("employee", "00008", "episodic"),
-        memory_key="node-1:episodic",
-        payload=payload,
-        event_id="event-2",
-    )
-    assert first == second == "event-1"
-    assert await storage.memory_outbox_backlog() == 1
+    try:
+        first = await storage.enqueue_memory_outbox(
+            namespace=("employee", "00008", "episodic"),
+            memory_key="node-1:episodic",
+            payload=payload,
+            event_id="event-1",
+        )
+        second = await storage.enqueue_memory_outbox(
+            namespace=("employee", "00008", "episodic"),
+            memory_key="node-1:episodic",
+            payload=payload,
+            event_id="event-2",
+        )
+        assert first == second == "event-1"
+        assert await storage.memory_outbox_backlog() == 1
 
-    event = (await storage.claim_memory_outbox(limit=1))[0]
-    await MemoryOutboxWorker(storage)._process(event)
-    assert await storage.memory_outbox_backlog() == 0
+        event = (await storage.claim_memory_outbox(limit=1))[0]
+        await MemoryOutboxWorker(storage)._process(event)
+        assert await storage.memory_outbox_backlog() == 0
 
-    row = await storage.fetchone(
-        "SELECT status,attempt FROM memory_outbox WHERE event_id='event-1'"
-    )
-    assert tuple(row) == ("completed", 1)
-    memories = await MemoryService(storage).search(employee_id="00008", query="")
-    assert len(memories) == 1
-    assert memories[0]["embedding_status"] == "pending"
+        row = await storage.fetchone(
+            "SELECT status,attempt FROM memory_outbox WHERE event_id='event-1'"
+        )
+        assert tuple(row) == ("completed", 1)
+        memories = await MemoryService(storage).search(employee_id="00008", query="")
+        assert len(memories) == 1
+        assert memories[0]["embedding_status"] == "indexed"
+    finally:
+        await storage.close()
 
 
 @pytest.mark.asyncio
@@ -371,3 +385,188 @@ async def test_vector_search_filters_verified_status_before_similarity_limit(tmp
         assert rows[0]["score"] is not None
     finally:
         await vector_storage.close()
+
+
+@pytest.mark.asyncio
+async def test_outbox_embedding_failure_holds_then_indexes_same_memory_after_recovery(tmp_path):
+    from langchain_core.embeddings import Embeddings
+
+    class RecoverableEmbedding(Embeddings):
+        available = False
+
+        def embed_documents(self, texts):
+            if not self.available:
+                raise RuntimeError("embedding provider unavailable")
+            return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+        def embed_query(self, text):
+            if not self.available:
+                raise RuntimeError("embedding provider unavailable")
+            return [1.0, 0.0, 0.0, 0.0]
+
+        async def aembed_documents(self, texts):
+            return self.embed_documents(texts)
+
+        async def aembed_query(self, text):
+            return self.embed_query(text)
+
+    embedder = RecoverableEmbedding()
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize(memory_index={
+        "dims": 4,
+        "embed": embedder,
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "recoverable-test",
+        "provider_fingerprint": "local-test",
+        "provider_available": False,
+    })
+    try:
+        payload = {
+            "employee_id": "00008",
+            "scope": "employee",
+            "memory_type": "episodic",
+            "subject": "embedding recovery",
+            "text": "durable memory survives provider failure",
+            "source_node_id": "node-recovery",
+        }
+        await storage.enqueue_memory_outbox(
+            namespace=("employee", "00008", "episodic"),
+            memory_key="node-recovery:episodic",
+            payload=payload,
+            event_id="event-recovery",
+        )
+
+        first_claim = (await storage.claim_memory_outbox(limit=1))[0]
+        await MemoryOutboxWorker(storage)._process(first_claim)
+
+        held = await storage.fetchone(
+            "SELECT status,attempt,next_retry_at,last_error FROM memory_outbox WHERE event_id=?",
+            ("event-recovery",),
+        )
+        assert held[0] == "holding"
+        assert held[1] == 1
+        assert held[2]
+        assert held[3] == "RuntimeError"
+        pending_rows = await MemoryService(storage).search(employee_id="00008", query="")
+        assert len(pending_rows) == 1
+        memory_id = pending_rows[0]["memory_id"]
+        assert pending_rows[0]["embedding_status"] == "pending"
+        assert int((await storage.fetchone("SELECT COUNT(*) FROM store_vectors"))[0]) == 0
+
+        embedder.available = True
+        await storage.execute(
+            "UPDATE memory_outbox SET next_retry_at=NULL WHERE event_id=?",
+            ("event-recovery",),
+        )
+        second_claim = (await storage.claim_memory_outbox(limit=1))[0]
+        await MemoryOutboxWorker(storage)._process(second_claim)
+
+        completed = await storage.fetchone(
+            "SELECT status,attempt,next_retry_at,last_error FROM memory_outbox WHERE event_id=?",
+            ("event-recovery",),
+        )
+        assert tuple(completed) == ("completed", 2, None, None)
+        recovered_rows = await MemoryService(storage).search(
+            employee_id="00008", query="provider recovery"
+        )
+        assert len(recovered_rows) == 1
+        assert recovered_rows[0]["memory_id"] == memory_id
+        assert recovered_rows[0]["embedding_status"] == "indexed"
+        assert recovered_rows[0]["score"] is not None
+        assert int((await storage.fetchone("SELECT COUNT(*) FROM store"))[0]) == 1
+        assert int((await storage.fetchone("SELECT COUNT(*) FROM store_vectors"))[0]) == 1
+    finally:
+        await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_embedding_yields_while_business_provider_call_is_active(tmp_path):
+    import asyncio
+    from langchain_core.embeddings import Embeddings
+
+    from onemancompany.core.provider_gateway import (
+        ProviderGateway,
+        ProviderPriority,
+    )
+
+    class ObservableEmbedding(Embeddings):
+        def __init__(self):
+            self.started = asyncio.Event()
+
+        def embed_documents(self, texts):
+            return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+        def embed_query(self, text):
+            return [1.0, 0.0, 0.0, 0.0]
+
+        async def aembed_documents(self, texts):
+            self.started.set()
+            return self.embed_documents(texts)
+
+        async def aembed_query(self, text):
+            self.started.set()
+            return self.embed_query(text)
+
+    embedder = ObservableEmbedding()
+    storage = RuntimeStorage(tmp_path / "runtime.sqlite3")
+    await storage.initialize(memory_index={
+        "dims": 4,
+        "embed": embedder,
+        "text_fields": ["text"],
+        "index_version": "v1",
+        "embedding_model": "priority-test",
+        "provider_fingerprint": "isolated-memory-provider",
+    })
+    gateway = ProviderGateway(storage, default_concurrency=1)
+    await gateway.start()
+    business_started = asyncio.Event()
+    release_business = asyncio.Event()
+
+    async def business_call():
+        business_started.set()
+        await release_business.wait()
+        return "business-complete"
+
+    try:
+        await storage.enqueue_memory_outbox(
+            namespace=("employee", "00008", "episodic"),
+            memory_key="priority-memory",
+            payload={
+                "employee_id": "00008",
+                "scope": "employee",
+                "memory_type": "episodic",
+                "subject": "priority",
+                "text": "background embedding must yield",
+            },
+            event_id="priority-memory-event",
+        )
+        event = (await storage.claim_memory_outbox(limit=1))[0]
+        business = asyncio.create_task(gateway.invoke(
+            context={
+                "request_id": "foreground-business",
+                "provider": "chat-provider",
+                "credential_fingerprint": "chat-account",
+                "account_or_model_pool": "chat",
+            },
+            priority=ProviderPriority.BUSINESS,
+            invoke=business_call,
+        ))
+        await business_started.wait()
+
+        memory = asyncio.create_task(
+            MemoryOutboxWorker(storage, provider_gateway=gateway)._process(event)
+        )
+        await asyncio.sleep(0.03)
+        assert not embedder.started.is_set()
+
+        release_business.set()
+        await asyncio.gather(business, memory)
+        assert embedder.started.is_set()
+        row = await storage.fetchone(
+            "SELECT status FROM memory_outbox WHERE event_id='priority-memory-event'"
+        )
+        assert row[0] == "completed"
+    finally:
+        await gateway.stop()
+        await storage.close()

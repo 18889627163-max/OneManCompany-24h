@@ -8,6 +8,10 @@ function assert(cond, msg) { if (cond) console.log(`  ok  ${msg}`); else { failu
 assert(/active_tasks/.test(src), 'bootstrap and renderer code mention active_tasks');
 assert(/processing/.test(src) && /pending/.test(src) && /holding/.test(src), 'frontend handles domain task states');
 assert(/_fetchAndRenderActiveTasks/.test(src), 'state refresh has an active-task fetch seam');
+assert(/function taskAttentionLabel/.test(src), 'frontend has a recovery attention label seam');
+assert(/等待模型容量/.test(src), 'provider capacity holding has a visible label');
+assert(/正在恢复上下文/.test(src), 'checkpoint recovery has a visible label');
+assert(/等待记忆数据库/.test(src), 'memory database holding has a visible label');
 function stats(tasks) {
   return tasks.reduce((out, task) => {
     const s = task.status;
