@@ -134,7 +134,7 @@
 - legacy `iter_009.yaml` 与目录化 `iter_009/task_tree.yaml` 已分别建立哈希基线，本轮前后同时保持不变；
 - 本地 Ollama Embedding、worker pending/backoff/recovery 和 Provider 让位 Gate 均已通过；
 - Online Backup 到独立 data root 的 TaskTree/checkpoint/receipt/ledger/outbox/acceptance 只读对账已通过；
-- 仍缺少 24 小时墙钟、真机 smoke、FFmpeg/FFprobe 证据和最终四人 standard v2 正式复验；
+- 24 小时墙钟 supervisor、隔离备份、监控和故障调度已实现并于 2026-08-15 13:24:57 启动真实 86,400 秒运行；仍缺少运行完成结论、真机 smoke、FFmpeg/FFprobe 证据和最终四人 standard v2 正式复验；
 - 全新 standard v2 iteration 的四人正式复验与显式验收。
 
 **当前结论：** P0 和隔离 Recovery Gate 已通过，但 `formal_24h_launch_allowed=false`。不得把隔离 subprocess、隔离服务或单元测试结果写成正式业务上线。
@@ -1387,7 +1387,7 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 
 ### P2：运营验收
 
-1. 完整 24 小时墙钟故障注入；
+1. **运行中：** 完整 24 小时墙钟故障注入（2026-08-15 13:24:57 至最早 2026-08-16 13:24:57）；运行根、故障计划和恢复命令见 `reports/WALL-CLOCK-GATE-RUN-20260815.md`；
 2. 真机 smoke、FFmpeg/FFprobe 和设备证据；
 3. 创建全新 standard v2 iteration，完成四人正式复验；
 4. 确认所有子任务由真实 `accept_child()`/`reject_child()` 决定，Closure Gate 不接受 Auto-accepted 或记忆结论；

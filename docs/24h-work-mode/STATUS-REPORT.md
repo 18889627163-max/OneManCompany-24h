@@ -1,7 +1,7 @@
 # 24 小时工作模式实施状态报告
 
 **检查日期**：2026-08-15
-**报告版本**：5.2
+**报告版本**：5.3
 **整体状态**：🟡 实施中，尚未正式上线
 
 > 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 通过，不等于 24 小时墙钟、真机 smoke 和最终 standard v2 iteration 已通过。
@@ -40,6 +40,8 @@
 - ✅ 最新完整测试 `4708 passed, 5 skipped, 72 warnings in 175.04s`；本轮 Gate 前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和两份受保护 `iter_009` 文件的 SHA-256 一致。
 - ✅ standard v2 三阶段服务恢复 Gate 已通过：在全新临时 data root 中分别于 dispatch、executor started receipt 和 side-effect ledger completed 边界退出并重启，均沿同一 checkpoint thread 恢复且未重复派发或副作用。
 - ✅ SQLite Online Backup 已恢复到独立 data root，并以只读模式完成 TaskTree、checkpoint、receipt、ledger、acceptance、Memory Outbox 和 memory source refs 对账。
+- ✅ 24 小时墙钟 Gate 的 `prepare/run/status/finalize`、可恢复 supervisor、资源/health/SQLite/TaskTree 监控和四类故障调度已实现；相关集成回归 `11 passed`，真实后端 8 秒预检及 Provider/Ollama sidecar 预检均通过。
+- 🟡 真实 86,400 秒墙钟已于 2026-08-15 13:24:57 Asia/Shanghai 启动，最早于 2026-08-16 13:24:57 完成；当前只能标记 `running`，不能标记通过。
 
 ### 1.1.1 附件日志复核与新增隔离发现
 
@@ -47,7 +49,7 @@
 - Talent Market 的两次 `RemoteProtocolError` 均被 keepalive 自动重连恢复，属于远端 SSE 短断线，不是本地服务崩溃。
 - `/health` 返回 404 是调用了不存在的旧路径；正式健康接口是 `/api/health`，附件中该接口返回 200。
 - 只读审计发现 `.onemancompany/company/human_resource/ex-employees/00010/profile.yaml` 再次存在，内容哈希与此前已隔离记录一致。根因是 pytest 只隔离 active employee 路径而遗漏 ex-employee 路径；代码测试隔离已修复，但该正式历史记录本轮未删除、未移动，后续必须沿用“验证备份 → dry-run → quarantine → 哈希复核”的受控流程。
-- 附件中标记为 `2026-08-15` 的日志时间晚于本报告当前日期 `2026-08-14`，因此只作为进程顺序证据，不作为当前日期或墙钟演练证据。
+- 附件中标记为 `2026-08-15` 的旧日志与当前报告日期相同，但仍只作为当时进程顺序证据；本轮墙钟证据只认新的隔离 run root、durable state 和 JSONL 事件。
 
 ### 1.2 本轮恢复修复
 
@@ -63,7 +65,7 @@
 
 ### 1.3 仍未完成
 
-- ⏳ 完整 24 小时墙钟运行，以及运行期间的 Provider、Embedding、数据库和服务故障注入。
+- 🟡 完整 24 小时墙钟正在运行：开始于 2026-08-15 13:24:57，最早结束于 2026-08-16 13:24:57；Provider、Embedding、后端重启和 SQLite lock 将按 durable schedule 分时注入。
 - ⏳ 真机 smoke、FFmpeg/FFprobe 和设备证据。
 - ⏳ 创建全新 standard v2 iteration，完成四人正式复验和显式验收。
 
@@ -93,7 +95,7 @@
 | sqlite-vec/reindex | ✅ 隔离 Gate 通过 | `v0.1.9`、混合检索、shadow rebuild、原子切换和失败降级已验证 |
 | 真实 Embedding Provider | ✅ 隔离恢复 Gate 通过 | Ollama `0.32.12`、`embeddinggemma`、768 维；pending/holding/backoff、同 memory 补向量和动态 health 已通过，正式 26 条 outbox 未消费 |
 | dispatch/closure | ✅ 代码与专项测试通过 | 最终仍需全新正式 iteration 证据 |
-| 24 小时墙钟演练 | ❌ 未执行 | 正式上线阻塞项 |
+| 24 小时墙钟演练 | 🟡 运行中 | `reports/WALL-CLOCK-GATE-RUN-20260815.md`；86,400 秒未结束前仍是正式上线阻塞项 |
 | 真机 smoke | ❌ 未执行 | 正式上线阻塞项 |
 | `iter_009` 不变性 | ✅ 通过 | legacy `iterations/iter_009.yaml`=`4c8cdb...`；目录化 `iter_009/task_tree.yaml`=`b3b877...`；两个不同文件在本 Gate 前后均不变 |
 
@@ -243,8 +245,8 @@ PASS=35 FAIL=0 WARN=0
 7. **已完成：** 在隔离维护窗口和全新临时 data root 中创建 `recovery-drill-20260815/iter_001` standard v2 恢复演练 iteration，未使用或修改 `iter_009`。
 8. **已完成：** 在 dispatch、executor started receipt 和 side-effect ledger completed 三个边界分别停止/重启服务，同 thread、receipt、ledger、外部副作用和 acceptance 对账全部通过。
 9. **已完成：** 将 SQLite Online Backup 恢复到独立 data root，以只读模式完成 TaskTree/checkpoint/store/outbox/dispatch/ledger/acceptance/source refs 对账。
-10. **下一步：** 执行完整 24 小时墙钟故障注入和资源稳定性验证。
-11. 24 小时墙钟通过后执行真机 smoke，并保存 FFmpeg/FFprobe 和设备证据。
+10. **运行中：** 真实 24 小时墙钟已于 2026-08-15 13:24:57 启动；持续监控资源、Provider、Memory Outbox、checkpoint、TaskTree 和正式基线哈希，并按计划注入四类故障。
+11. **最早于 2026-08-16 13:24:57 执行：** 墙钟 Gate 和最终哈希/outbox 对账通过后，执行真机 smoke，并保存 FFmpeg/FFprobe 和设备证据。
 12. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
 
 ## 6. 上线判定
