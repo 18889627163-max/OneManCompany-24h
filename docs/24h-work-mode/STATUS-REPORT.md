@@ -1,10 +1,10 @@
 # 24 小时工作模式实施状态报告
 
-**检查日期**：2026-08-14  
-**报告版本**：5.1
+**检查日期**：2026-08-15
+**报告版本**：5.2
 **整体状态**：🟡 实施中，尚未正式上线
 
-> 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0、Embedding 和受控真实 HTTP Provider 429 Gate 通过，不等于真实业务服务重启、24 小时墙钟和最终 standard v2 iteration 已通过。
+> 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 通过，不等于 24 小时墙钟、真机 smoke 和最终 standard v2 iteration 已通过。
 
 ## 1. 当前结论
 
@@ -37,7 +37,9 @@
 - ✅ Embedding pending/backoff/recovery Gate 已通过：结构化记忆先以 `pending` 落盘，故障时 outbox `holding` 并持久化 attempt/`next_retry_at`，恢复后同一 memory 补向量并完成；正式 26 条 outbox 未消费。
 - ✅ 受控真实 HTTP Provider 429 Gate 已通过：真实 `ChatOpenAI` HTTP 429→进程重启→HTTP 200，TaskNode durable holding、attempt/`next_retry_at`、同 checkpoint thread、dispatch/side-effect 防重放、Memory worker 让位和恢复 UI 全部通过。
 - ✅ 测试误触正式 Runtime SQLite 的隔离漏洞已修复；pytest 现在同时隔离 active/ex-employee 路径，解雇流程测试不再写入正式历史员工目录。
-- ✅ 最新完整测试 `4706 passed, 5 skipped, 72 warnings in 169.46s`；本轮 Gate 前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和当前磁盘 `iter_009` 的 SHA-256 一致。
+- ✅ 最新完整测试 `4708 passed, 5 skipped, 72 warnings in 175.04s`；本轮 Gate 前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和两份受保护 `iter_009` 文件的 SHA-256 一致。
+- ✅ standard v2 三阶段服务恢复 Gate 已通过：在全新临时 data root 中分别于 dispatch、executor started receipt 和 side-effect ledger completed 边界退出并重启，均沿同一 checkpoint thread 恢复且未重复派发或副作用。
+- ✅ SQLite Online Backup 已恢复到独立 data root，并以只读模式完成 TaskTree、checkpoint、receipt、ledger、acceptance、Memory Outbox 和 memory source refs 对账。
 
 ### 1.1.1 附件日志复核与新增隔离发现
 
@@ -61,10 +63,8 @@
 
 ### 1.3 仍未完成
 
-- ⏳ 使用**全新专用 standard v2 演练 iteration**执行真实后端服务停止/重启；不得使用 `iter_009`。
-- ⏳ 在真实 dispatch、executor started 和正式业务 side-effect 阶段分别注入故障并完成 receipt 对账。
-- ⏳ 独立恢复后针对真实业务 checkpoint/TaskTree/dispatch receipt/acceptance audit 的只读对账。
-- ⏳ 完整 24 小时墙钟运行、真机 smoke、FFmpeg/FFprobe 证据。
+- ⏳ 完整 24 小时墙钟运行，以及运行期间的 Provider、Embedding、数据库和服务故障注入。
+- ⏳ 真机 smoke、FFmpeg/FFprobe 和设备证据。
 - ⏳ 创建全新 standard v2 iteration，完成四人正式复验和显式验收。
 
 ## 2. Gate 总表
@@ -88,7 +88,7 @@
 | RuntimeStorage 只读对账 | ✅ 通过 | 7 条 legacy system orphan，正式 actionable=0；26 条 outbox 分类完成且数据库哈希不变 |
 | MCP/SSE 生命周期 | ✅ 本地回归通过 | owner task 统一 enter/use/exit；真实远端断线演练待完成 |
 | 受控真实 HTTP Provider 429 Gate | ✅ 通过 | `REAL-PROVIDER-429-GATE-REPORT.json`；ChatOpenAI HTTP 429→重启→200、durable holding、优先级/Memory 让位、同 thread 恢复和 UI 通过 |
-| 真实业务服务重启 Gate | 🟡 待演练 | 尚未针对新专用正式演练 iteration 执行 |
+| standard v2 三阶段服务恢复 Gate | ✅ 隔离维护窗口通过 | `REAL-SERVICE-RECOVERY-GATE-REPORT.json`；dispatch、executor started、side-effect 三边界恢复及独立只读恢复对账全部通过，正式服务未停止 |
 | memory ACL/可信度 | ✅ 真实模型 Gate 通过 | employee/project ACL、candidate/status 和 Prompt budget 已用本地 Ollama 实测 |
 | sqlite-vec/reindex | ✅ 隔离 Gate 通过 | `v0.1.9`、混合检索、shadow rebuild、原子切换和失败降级已验证 |
 | 真实 Embedding Provider | ✅ 隔离恢复 Gate 通过 | Ollama `0.32.12`、`embeddinggemma`、768 维；pending/holding/backoff、同 memory 补向量和动态 health 已通过，正式 26 条 outbox 未消费 |
@@ -104,7 +104,7 @@
 最终全量测试：
 
 ```text
-4706 passed, 5 skipped, 72 warnings in 169.46s
+4708 passed, 5 skipped, 72 warnings in 175.04s
 ```
 
 本轮 MCP/SSE 相关模块回归：
@@ -172,7 +172,7 @@ standard_v2_p0 = passed
 formal_24h_launch_allowed = false
 ```
 
-`formal_24h_launch_allowed=false` 是预期结果：P0、隔离 Recovery、Embedding 和受控真实 HTTP Provider 429 Gate 已完成，但真实业务服务重启、24 小时墙钟、真机 smoke 和最终 iteration 验收尚未完成。
+`formal_24h_launch_allowed=false` 是预期结果：P0、隔离 Recovery、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 已完成，但 24 小时墙钟、真机 smoke 和最终 iteration 验收尚未完成。
 
 ### 3.4 正式数据保护与并发服务说明
 
@@ -240,11 +240,12 @@ PASS=35 FAIL=0 WARN=0
 4. **已完成：** Embedding pending/backoff/recovery Gate 通过；故障时结构化记忆保留、outbox holding，恢复后同一 memory 补向量并完成。详见 `reports/EMBEDDING-RECOVERY-GATE-20260814.md`。
 5. **已完成：** 受控真实 HTTP Provider 429 Gate 通过；ChatOpenAI HTTP 429→重启→200、TaskNode holding、durable backoff、优先级、memory worker 让位和恢复 UI 均已验证。详见 `reports/REAL-PROVIDER-429-GATE-20260814.md`。
 6. **已澄清：** 历史 `4c8cdb...` 是 legacy `iterations/iter_009.yaml`，当前目录化 TaskTree `b3b877...` 是另一个文件；二者本轮前后均不变。
-7. **下一步：** 申请维护窗口并创建全新专用 standard v2 恢复演练 iteration；不使用 `iter_009`，不干扰当前真实服务任务。
-8. 在 dispatch、executor started 和 side-effect 后分别停止/重启服务，验证同 thread、receipt、ledger 和 acceptance 对账。
-9. 将在线备份恢复到全新 data root，执行 TaskTree/checkpoint/store/outbox/dispatch/acceptance 的只读对账。
-10. 执行完整 24 小时墙钟演练和真机 smoke。
-11. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
+7. **已完成：** 在隔离维护窗口和全新临时 data root 中创建 `recovery-drill-20260815/iter_001` standard v2 恢复演练 iteration，未使用或修改 `iter_009`。
+8. **已完成：** 在 dispatch、executor started receipt 和 side-effect ledger completed 三个边界分别停止/重启服务，同 thread、receipt、ledger、外部副作用和 acceptance 对账全部通过。
+9. **已完成：** 将 SQLite Online Backup 恢复到独立 data root，以只读模式完成 TaskTree/checkpoint/store/outbox/dispatch/ledger/acceptance/source refs 对账。
+10. **下一步：** 执行完整 24 小时墙钟故障注入和资源稳定性验证。
+11. 24 小时墙钟通过后执行真机 smoke，并保存 FFmpeg/FFprobe 和设备证据。
+12. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
 
 ## 6. 上线判定
 
@@ -255,7 +256,7 @@ PASS=35 FAIL=0 WARN=0
 formal_24h_launch_allowed=false
 ```
 
-不得仅依据 readiness、P0 Gate、隔离 recovery tests、历史记忆、Embedding 或受控 HTTP Provider Gate 宣称 24 小时模式已正式上线。最终上线仍必须具备真实业务服务恢复、独立恢复对账、24 小时墙钟、真机证据和显式 acceptance audit。
+不得仅依据 readiness、P0 Gate、隔离 recovery tests、历史记忆、Embedding、受控 HTTP Provider Gate 或隔离服务恢复 Gate 宣称 24 小时模式已正式上线。最终上线仍必须具备完整 24 小时墙钟、真机证据、全新四人 standard v2 iteration 和显式 acceptance audit。
 
 ## 2026-08-14 Runtime warning remediation execution
 
@@ -270,7 +271,7 @@ Code remediation, audited formal skill reconciliation, historical record quarant
 
 隔离 ARM64 Runtime SQLite 已实际加载 `sqlite-vec v0.1.9`，完成结构化过滤优先的混合检索、v1→v2 versioned shadow reindex、单事务 active 切换、模型空间不兼容时结构化降级，以及失败时 outbox 保持 `pending/attempt=0`。完整测试为 `4693 passed, 5 skipped, 73 warnings in 135.83s`。
 
-首次完整测试暴露出 lifespan 测试误用正式 `.onemancompany/data/runtime.sqlite3` 的隔离漏洞，并对正式库执行了 OMC schema v4 additive migration。没有回滚或覆盖正式库；只读审计确认 `integrity_check=ok`、index contract=0、archived vector=0、正式 outbox 26 条仍全部未尝试。代码现已让相对数据库路径跟随 `OMC_DATA_ROOT`，unit lifespan 使用临时数据库，并在 pytest 直接访问仓库正式库时 fail closed。修复后完整测试前后正式库 SHA-256 保持 `2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de`，大小保持 `120377344`。本地 Ollama `embeddinggemma` 真实 Embedding Gate 已通过；聊天 Provider 429/worker 让位、真实服务恢复和 24 小时墙钟仍未完成，因此 `formal_24h_launch_allowed=false`。详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。
+首次完整测试暴露出 lifespan 测试误用正式 `.onemancompany/data/runtime.sqlite3` 的隔离漏洞，并对正式库执行了 OMC schema v4 additive migration。没有回滚或覆盖正式库；只读审计确认 `integrity_check=ok`、index contract=0、archived vector=0、正式 outbox 26 条仍全部未尝试。代码现已让相对数据库路径跟随 `OMC_DATA_ROOT`，unit lifespan 使用临时数据库，并在 pytest 直接访问仓库正式库时 fail closed。修复后完整测试前后正式库 SHA-256 保持 `2dfa8af78e3215d43d78b9bf4b2cd6c671c4e69612a6f7f52fd55717b9daa7de`，大小保持 `120377344`。本地 Ollama `embeddinggemma` 真实 Embedding Gate 已通过；在该阶段当时，聊天 Provider 429/worker 让位、服务恢复和 24 小时墙钟尚未完成。随后 Provider 429 与 standard v2 三阶段服务恢复 Gate 已于 2026-08-15 前完成；24 小时墙钟仍未完成，因此 `formal_24h_launch_allowed=false`。详见 `reports/MEMORY-VECTOR-GATE-20260814.md`。
 
 
 ## 2026-08-14 受控真实 HTTP Provider 429 Gate
