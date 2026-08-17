@@ -42,20 +42,20 @@
 
 ### 指挥层（2人）
 - **00003 - COO**（Alex）
-  - 模型: claude-opus-5
+  - 模型: gpt-5.6-sol
   - 职责: 24/7自动调度、任务分配、进度管理
   - 工作模式: 全天候自动化
   - [详细工作原则](../employee-work-principles/00003-coo-work-principles.md)
 
 - **00010 - Tech Lead**
-  - 模型: claude-fable-5
+  - 模型: gpt-5.6-sol
   - 职责: 架构设计、难题攻关、代码审查
   - 工作模式: 按需工作（主要白天）
   - [详细工作原则](../employee-work-principles/00010-tech-lead-work-principles.md)
 
 ### 工程开发层（4人）
 - **00006 - 高级后端工程师**（Alpha队长）
-  - 模型: claude-opus-5
+  - 模型: gpt-5.6-sol
   - 职责: 核心API开发、数据库设计、认证授权
   - [详细工作原则](../employee-work-principles/00006-senior-backend-work-principles.md)
 
@@ -65,7 +65,7 @@
   - [详细工作原则](../employee-work-principles/00011-mid-backend-work-principles.md)
 
 - **00007 - 全栈工程师**
-  - 模型: claude-sonnet-5
+  - 模型: gpt-5.6-sol
   - 职责: 前端开发、前后端集成、端到端测试
   - [详细工作原则](../employee-work-principles/00007-fullstack-work-principles.md)
 
@@ -76,7 +76,7 @@
 
 ### 质量保障层（2人）
 - **00009 - QA Lead**
-  - 模型: claude-sonnet-5
+  - 模型: gpt-5.6-sol
   - 职责: 测试策略、功能测试、质量把关
   - [详细工作原则](../employee-work-principles/00009-qa-lead-work-principles.md)
 
@@ -97,7 +97,7 @@
   - [详细工作原则](../employee-work-principles/00004-ea-work-principles.md)
 
 - **00005 - CSO**
-  - 模型: claude-sonnet-5
+  - 模型: gpt-5.6-sol
   - 职责: 客户关系、产品推广、商务支持
   - [详细工作原则](../employee-work-principles/00005-cso-work-principles.md)
 
@@ -112,17 +112,17 @@
 
 | 层级 | 人数 | 模型 | 单价/月 | 小计 |
 |------|------|------|---------|------|
-| 指挥层 | 1 | claude-opus-5 | $450 | $450 |
-| 指挥层 | 1 | claude-fable-5 | $270 | $270 |
-| 工程层 | 2 | claude-opus-5 | $450 | $900 |
+| 指挥层 | 1 | gpt-5.6-sol | $450 | $450 |
+| 指挥层 | 1 | gpt-5.6-sol | $270 | $270 |
+| 工程层 | 2 | gpt-5.6-sol | $450 | $900 |
 | 工程层 | 1 | gpt-5.6-sol | $180 | $180 |
-| 工程层 | 1 | claude-sonnet-5 | $300 | $300 |
+| 工程层 | 1 | gpt-5.6-sol | $300 | $300 |
 | 工程层 | 1 | gpt-5.6-sol | $200 | $200 |
-| 质量层 | 1 | claude-sonnet-5 | $300 | $300 |
+| 质量层 | 1 | gpt-5.6-sol | $300 | $300 |
 | 质量层 | 1 | gpt-5.6-sol | $180 | $180 |
 | 支持层 | 2 | deepseek-v4-flash | $90 | $180 |
 | 支持层 | 1 | gpt-5.6-sol | $180 | $180 |
-| 支持层 | 1 | claude-sonnet-5 | $300 | $300 |
+| 支持层 | 1 | gpt-5.6-sol | $300 | $300 |
 | **总计** | **12人** | | | **$3,440/月** |
 
 详细分析见：[cost-analysis.md](./cost-analysis.md)

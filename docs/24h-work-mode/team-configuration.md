@@ -32,7 +32,7 @@
 ```yaml
 姓名: Alex COO
 昵称: 铁面侠
-模型: claude-opus-5
+模型: gpt-5.6-sol
 价格: $450/月
 等级: Founding
 部门: Operations
@@ -68,7 +68,7 @@
 #### 00010 - Tech Lead
 ```yaml
 姓名: Tech Lead
-模型: claude-fable-5
+模型: gpt-5.6-sol
 价格: $270/月
 等级: Senior
 部门: Engineering
@@ -105,7 +105,7 @@
 #### 00006 - 高级后端工程师（Alpha队长）
 ```yaml
 姓名: Senior Backend Engineer
-模型: claude-opus-5
+模型: gpt-5.6-sol
 价格: $450/月
 等级: Senior
 部门: Engineering
@@ -178,7 +178,7 @@
 #### 00007 - 全栈工程师
 ```yaml
 姓名: Full-stack Engineer
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 价格: $300/月
 等级: Senior
 部门: Engineering
@@ -259,7 +259,7 @@
 #### 00009 - QA Lead
 ```yaml
 姓名: QA Lead
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 价格: $300/月
 等级: Lead
 部门: Quality Assurance
@@ -400,7 +400,7 @@
 #### 00005 - CSO
 ```yaml
 姓名: Chief Sales Officer
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 价格: $300/月
 等级: C-level
 部门: Sales
@@ -447,48 +447,23 @@ Tech Lead (00010) → 技术指导 → 工程师
 
 ## 📋 模型分配策略
 
-### 为什么这样分配？
+### 统一模型决策
 
-#### Claude Opus 5（3人）- 最高能力
-- **00003 COO**: 需要复杂决策和协调
-- **00006 高级后端**: 核心API开发，架构关键
-- **Tech Lead**: 难题攻关，深度思考
+自 2026-08-17 起，除 HR `00002` 继续使用 `deepseek-v4-flash` 外，其余正式员工统一使用 `gpt-5.6-sol`。本次变更消除 custom Provider 对 Claude 系列模型缺少 channel 导致的 durable holding，并降低跨模型行为差异。
 
-#### Claude Fable 5（1人）- 最新最强
-- **00010 Tech Lead**: 技术领导者，需要最强推理
+规则：
 
-#### Claude Sonnet 5（3人）- 平衡性能
-- **00007 全栈**: 前后端协调，需要理解力
-- **00009 QA Lead**: 测试策略，需要批判性思维
-- **00005 CSO**: 客户沟通，需要语言能力
-
-#### GPT 5.6 Sol/Terra（3人）- 高性价比
-- **00011 中级后端**: 辅助开发，不需顶级模型
-- **00012 自动化测试**: 脚本编写，稳定可靠
-- **00008 DevOps**: 运维任务，脚本为主
-- **00004 EA**: 文档整理，组织能力
-
-#### Deepseek v4 Flash（2人）- 经济实惠
-- **00002 HR**: 招募流程，简单任务
-- 备用支持岗位
+- `00001`、`00003`—`00012`：`gpt-5.6-sol`；
+- `00002`：`deepseek-v4-flash`；
+- 不再把 `claude-opus-5`、`claude-sonnet-5` 或 `claude-fable-5` 作为正式员工目标模型；
+- 历史 iteration 和审计证据保留原模型名称，不做回写；
+- 模型变更后必须创建全新 standard v2 iteration，不能在旧 iteration 中混用执行基线。
 
 ---
 
 ## 💡 使用建议
 
-### 调整模型配置
-
-如果预算紧张，可以降级：
-```yaml
-降级方案（节省 ~$1000/月）:
-  00003 COO: claude-opus-5 → claude-sonnet-5
-  00006 高级后端: claude-opus-5 → claude-sonnet-5
-  00010 Tech Lead: claude-fable-5 → claude-opus-5
-  
-  总成本: $3,440 → $2,440
-```
-
-如需临时升级 00011/00012，必须通过配置 revision、变更审批和独立回归验证；默认正式目标保持 `gpt-5.6-sol`。
+模型调整必须同步修改正式 profile、工作原则、检查脚本、配置 revision 和验收基线。不得只修改单个员工 profile，也不得在正在运行的 iteration 中静默换模。
 
 ---
 

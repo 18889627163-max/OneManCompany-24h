@@ -1,10 +1,10 @@
 # 24 小时工作模式实施状态报告
 
-**检查日期**：2026-08-15
-**报告版本**：5.3
+**检查日期**：2026-08-17
+**报告版本**：5.9
 **整体状态**：🟡 实施中，尚未正式上线
 
-> 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入或隔离真实服务验证的事实。P0、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 通过，不等于 24 小时墙钟、真机 smoke 和最终 standard v2 iteration 已通过。
+> 本报告只记录已经由仓库内容、自动化测试、隔离 subprocess 故障注入、隔离真实服务或完整墙钟运行验证的事实。P0、Embedding、Provider 429、standard v2 三阶段服务恢复、独立只读恢复、真实 24 小时墙钟 Gate 和 OneManCompany 真实服务 Smoke 已通过；2026-08-17 已批准把所有 Claude 系列正式员工模型统一迁移为 `gpt-5.6-sol`。当前服务未运行，旧模型基线 `iter_019` 待正式中止，新 iteration、COO/EA 显式验收和 Closure Gate 尚未完成。
 
 ## 1. 当前结论
 
@@ -37,11 +37,15 @@
 - ✅ Embedding pending/backoff/recovery Gate 已通过：结构化记忆先以 `pending` 落盘，故障时 outbox `holding` 并持久化 attempt/`next_retry_at`，恢复后同一 memory 补向量并完成；正式 26 条 outbox 未消费。
 - ✅ 受控真实 HTTP Provider 429 Gate 已通过：真实 `ChatOpenAI` HTTP 429→进程重启→HTTP 200，TaskNode durable holding、attempt/`next_retry_at`、同 checkpoint thread、dispatch/side-effect 防重放、Memory worker 让位和恢复 UI 全部通过。
 - ✅ 测试误触正式 Runtime SQLite 的隔离漏洞已修复；pytest 现在同时隔离 active/ex-employee 路径，解雇流程测试不再写入正式历史员工目录。
-- ✅ 最新完整测试 `4708 passed, 5 skipped, 72 warnings in 175.04s`；本轮 Gate 前后正式 Runtime SQLite、active `00010`、当前 archived `00010` 和两份受保护 `iter_009` 文件的 SHA-256 一致。
+- ✅ Checkpoint 修复后的最新完整测试为 `4734 passed, 5 skipped, 73 warnings in 153.06s`；定向 execution checkpoint 回归为 `37 passed`。本轮前后受保护的目录化 `iter_009/task_tree.yaml` SHA-256 仍为 `b3b877e6b584feefe084a40f50a75b7161ae018b42910f9c2e54780e46d087ab`。
 - ✅ standard v2 三阶段服务恢复 Gate 已通过：在全新临时 data root 中分别于 dispatch、executor started receipt 和 side-effect ledger completed 边界退出并重启，均沿同一 checkpoint thread 恢复且未重复派发或副作用。
 - ✅ SQLite Online Backup 已恢复到独立 data root，并以只读模式完成 TaskTree、checkpoint、receipt、ledger、acceptance、Memory Outbox 和 memory source refs 对账。
 - ✅ 24 小时墙钟 Gate 的 `prepare/run/status/finalize`、可恢复 supervisor、资源/health/SQLite/TaskTree 监控和四类故障调度已实现；相关集成回归 `11 passed`，真实后端 8 秒预检及 Provider/Ollama sidecar 预检均通过。
-- 🟡 真实 86,400 秒墙钟已于 2026-08-15 13:24:57 Asia/Shanghai 启动，最早于 2026-08-16 13:24:57 完成；当前只能标记 `running`，不能标记通过。
+- ✅ 真实 86,400 秒墙钟已于 2026-08-16 13:24:57 Asia/Shanghai 完成并通过：实际 86,400.263 秒、1,437 次监控采样、四类故障全部通过、11 项最终检查全部为 true，Gate 输出 `formal_24h_launch_allowed=true`。
+- ✅ OneManCompany 当前版本真实服务 Smoke 已通过：后端/前端与核心 API 返回 HTTP 200，`00002`—`00012` 正式员工均可加载，13 条 automation 注册，RuntimeStorage/checkpoint/memory/sqlite-vec/Embedding/ProviderGateway 全部健康，readiness `PASS=35 FAIL=0 WARN=0`，SQLite 完整且服务干净关闭。
+- ✅ Smoke 首轮发现测试重建的非法历史 `ex-employees/00010`；在完整员工归档和 Runtime SQLite 备份后，通过 dry-run、append-only audit 和正式 quarantine 流程处理，第二轮未再出现目标告警，在职 `00010`、两份 `iter_009` 和正式 26 条 Memory Outbox 均保持受保护。
+- ❌ `iter_017` 正式复验未通过：`00006`—`00009` self-hosted executor 虽持有正式 `checkpoint_thread_id`，但 SQLite `checkpoints` 表没有对应执行 checkpoint 行；COO 已通过正式 `reject_child()` 拒绝 `00006`。该 iteration 的失败证据已保留，并已通过 `POST /api/task/iter_017/abort` 正式中止，禁止修补或重用。
+- ✅ 已修复 self-hosted formal v2 executor 的 checkpoint 边界：在独立 `checkpoint_ns=omc_execution` 中、进入 executor body 前写入 `phase=before_executor_handoff`，写入失败时节点进入 `holding/checkpoint_backend_unavailable`，不允许无 checkpoint 执行；同 generation 恢复继续使用同一 thread，且不会冒充默认 LangGraph graph checkpoint。
 
 ### 1.1.1 附件日志复核与新增隔离发现
 
@@ -62,12 +66,19 @@
 - 新增真实 subprocess crash worker：分别使用 `os._exit(87)` 和 `os._exit(88)` 模拟无 finally/close 的进程死亡。
 - P0 Gate 增加 `isolated_recovery_crash_resume_and_reconciliation` test group。
 - Talent Market 新增 task-bound context 回归测试，覆盖跨 task 关闭原始异常、call/ping owner task 路由和取消启动清理。
+- `RuntimeStorage` 新增 `omc_execution` 正式执行 checkpoint namespace 及 get/put/config 接口；execution checkpoint 只保存脱敏后的结构化恢复状态和任务描述 SHA-256，不保存原始 prompt。
+- `EmployeeManager._execute_task()` 在 formal v2 executor handoff 前强制持久化 execution checkpoint；checkpoint backend 不可用时 fail closed 到 holding。
 
 ### 1.3 仍未完成
 
-- 🟡 完整 24 小时墙钟正在运行：开始于 2026-08-15 13:24:57，最早结束于 2026-08-16 13:24:57；Provider、Embedding、后端重启和 SQLite lock 将按 durable schedule 分时注入。
-- ⏳ 真机 smoke、FFmpeg/FFprobe 和设备证据。
-- ⏳ 创建全新 standard v2 iteration，完成四人正式复验和显式验收。
+- ✅ 2026-08-17 已按负责人明确批准，将 `00003`、`00005`、`00006`、`00007`、`00009`、`00010` 的 Claude 系列模型统一改为 `gpt-5.6-sol`；正式 profile、工作原则、目标文档和 Gate 基线同步更新。
+- ⏳ `iter_019` 仍保留旧模型执行证据，当前服务未运行；下次启动必须禁用自动恢复，先正式中止 `iter_019`，再创建新 iteration。
+
+- ✅ 完整 24 小时墙钟已通过：2026-08-15 13:24:57 至 2026-08-16 13:24:57，Provider 429、Embedding 不可用、后端重启和 SQLite lock 均按 durable schedule 注入并恢复。
+- ❌ `iter_017` 已正式失败并中止：self-hosted executor 缺少真实 `omc_execution` checkpoint 行；原始证据已保留，不修补、不重用。
+- ❌ `iter_018` 已正式失败并中止：COO 对 `00009` 先后使用相同 `task_key` 但不同 `depends_on` 重派发，durable tool invocation ledger 正确返回 `tool_idempotency_conflict` 并 fail closed；原始证据已保留，不修补、不重用。
+- 🧾 `iter_019` 历史事实：前三个 child 已完成，COO 曾因旧配置 `claude-opus-5` 无可用 channel 保持 `holding/provider_capacity`。该 iteration 现在属于旧模型基线，等待服务恢复后正式中止。
+- ⛔ 模型迁移已经获得明确批准，但不得在 `iter_019` 的旧 checkpoint thread 中混用新模型；不得手工改 TaskTree、不得伪造 receipt/acceptance。服务恢复后先正式 abort，再创建新 iteration。
 
 ## 2. Gate 总表
 
@@ -94,9 +105,13 @@
 | memory ACL/可信度 | ✅ 真实模型 Gate 通过 | employee/project ACL、candidate/status 和 Prompt budget 已用本地 Ollama 实测 |
 | sqlite-vec/reindex | ✅ 隔离 Gate 通过 | `v0.1.9`、混合检索、shadow rebuild、原子切换和失败降级已验证 |
 | 真实 Embedding Provider | ✅ 隔离恢复 Gate 通过 | Ollama `0.32.12`、`embeddinggemma`、768 维；pending/holding/backoff、同 memory 补向量和动态 health 已通过，正式 26 条 outbox 未消费 |
+| `iter_017` 正式复验 | ❌ 已失败并正式中止 | 暴露 self-hosted executor 缺少真实 SQLite checkpoint 行；失败证据保留，不修补、不重用 |
+| `iter_018` 正式复验 | ❌ 已失败并正式中止 | 相同 `task_key` 不同参数触发 `tool_idempotency_conflict`；fail closed，证据保留，不修补、不重用 |
+| `iter_019` 正式复验 | 🧾 旧模型基线，待正式中止 | 旧配置下曾因 `claude-opus-5` 无 channel holding；统一迁移后禁止继续复用该 thread |
+| execution checkpoint 修复 | ✅ 代码与测试通过，待真实服务复验 | 独立 `omc_execution` namespace；定向 `37 passed`，完整 `4734 passed, 5 skipped` |
 | dispatch/closure | ✅ 代码与专项测试通过 | 最终仍需全新正式 iteration 证据 |
-| 24 小时墙钟演练 | 🟡 运行中 | `reports/WALL-CLOCK-GATE-RUN-20260815.md`；86,400 秒未结束前仍是正式上线阻塞项 |
-| 真机 smoke | ❌ 未执行 | 正式上线阻塞项 |
+| 24 小时墙钟演练 | ✅ 通过 | `reports/WALL-CLOCK-GATE-FINAL-20260816.md`；真实 86,400 秒、四类故障、11 项 final checks 全部通过 |
+| OneManCompany 真实服务 Smoke | ✅ 通过 | `reports/REAL-SERVICE-SMOKE-20260816.md`；核心页面/API HTTP 200、11 名非 CEO 员工、13 条 automation、health 全绿、readiness `35/0/0`、SQLite 完整、clean shutdown |
 | `iter_009` 不变性 | ✅ 通过 | legacy `iterations/iter_009.yaml`=`4c8cdb...`；目录化 `iter_009/task_tree.yaml`=`b3b877...`；两个不同文件在本 Gate 前后均不变 |
 
 ## 3. 已验证证据
@@ -106,7 +121,7 @@
 最终全量测试：
 
 ```text
-4708 passed, 5 skipped, 72 warnings in 175.04s
+4734 passed, 5 skipped, 73 warnings in 153.06s
 ```
 
 本轮 MCP/SSE 相关模块回归：
@@ -171,10 +186,11 @@ formal launch      = false
 
 ```text
 standard_v2_p0 = passed
-formal_24h_launch_allowed = false
+wall_clock_gate = passed
+formal_24h_launch_allowed = true
 ```
 
-`formal_24h_launch_allowed=false` 是预期结果：P0、隔离 Recovery、Embedding、受控真实 HTTP Provider 429、standard v2 三阶段服务恢复和独立只读恢复 Gate 已完成，但 24 小时墙钟、真机 smoke 和最终 iteration 验收尚未完成。
+`formal_24h_launch_allowed=true` 表示真实 24 小时墙钟 Gate 自身已满足进入下一阶段的条件，不表示整个项目已经正式上线。全新四人 standard v2 iteration、COO 显式验收和最终 Closure Gate 仍是正式上线阻塞项。
 
 ### 3.4 正式数据保护与并发服务说明
 
@@ -222,12 +238,16 @@ PASS=35 FAIL=0 WARN=0
 ## 4. 当前正式配置
 
 ```text
-00003 COO                  claude-opus-5
-00006 Senior Backend       claude-opus-5
-00007 Full-Stack           claude-sonnet-5
+00001 CEO                  gpt-5.6-sol
+00002 HR                   deepseek-v4-flash
+00003 COO                  gpt-5.6-sol
+00004 EA                   gpt-5.6-sol
+00005 CSO                  gpt-5.6-sol
+00006 Senior Backend       gpt-5.6-sol
+00007 Full-Stack           gpt-5.6-sol
 00008 DevOps/SRE           gpt-5.6-sol
-00009 QA Lead              claude-sonnet-5
-00010 Tech Lead            claude-fable-5
+00009 QA Lead              gpt-5.6-sol
+00010 Tech Lead            gpt-5.6-sol
 00011 Mid-level Backend    gpt-5.6-sol
 00012 Automation Test      gpt-5.6-sol
 ```
@@ -245,9 +265,9 @@ PASS=35 FAIL=0 WARN=0
 7. **已完成：** 在隔离维护窗口和全新临时 data root 中创建 `recovery-drill-20260815/iter_001` standard v2 恢复演练 iteration，未使用或修改 `iter_009`。
 8. **已完成：** 在 dispatch、executor started receipt 和 side-effect ledger completed 三个边界分别停止/重启服务，同 thread、receipt、ledger、外部副作用和 acceptance 对账全部通过。
 9. **已完成：** 将 SQLite Online Backup 恢复到独立 data root，以只读模式完成 TaskTree/checkpoint/store/outbox/dispatch/ledger/acceptance/source refs 对账。
-10. **运行中：** 真实 24 小时墙钟已于 2026-08-15 13:24:57 启动；持续监控资源、Provider、Memory Outbox、checkpoint、TaskTree 和正式基线哈希，并按计划注入四类故障。
-11. **最早于 2026-08-16 13:24:57 执行：** 墙钟 Gate 和最终哈希/outbox 对账通过后，执行真机 smoke，并保存 FFmpeg/FFprobe 和设备证据。
-12. 所有 Gate 通过后创建全新 standard v2 iteration，完成四人正式复验。
+10. **已完成：** 真实 24 小时墙钟于 2026-08-16 13:24:57 通过；资源、Provider、Memory Outbox、checkpoint、TaskTree、正式基线哈希和四类故障结果均已对账。
+11. **已完成：** OneManCompany 当前版本真实服务 Smoke 已通过，证据见 `reports/REAL-SERVICE-SMOKE-20260816.md`。
+12. 已批准统一模型迁移：服务恢复后先通过正式 API 中止旧模型基线 `iter_019`，再创建全新 standard v2 iteration；不得在旧 checkpoint thread 中混用新模型。
 
 ## 6. 上线判定
 
@@ -255,10 +275,12 @@ PASS=35 FAIL=0 WARN=0
 
 ```text
 实施中，尚未正式上线
-formal_24h_launch_allowed=false
+wall_clock_gate=passed
+formal_24h_launch_allowed=true
+project_formal_launch_allowed=false
 ```
 
-不得仅依据 readiness、P0 Gate、隔离 recovery tests、历史记忆、Embedding、受控 HTTP Provider Gate 或隔离服务恢复 Gate 宣称 24 小时模式已正式上线。最终上线仍必须具备完整 24 小时墙钟、真机证据、全新四人 standard v2 iteration 和显式 acceptance audit。
+不得仅依据 24 小时墙钟通过宣称项目已正式上线。OneManCompany 当前版本真实服务 Smoke 证据已经具备；最终上线仍必须具备全新四人 standard v2 iteration、显式 `accept_child()`/`reject_child()` acceptance audit 和通过的 Closure Gate；`Auto-accepted` 不能替代显式验收。Android/ADB、FFmpeg/FFprobe 和 cloud-test-platform 不属于本项目当前上线判定。
 
 ## 2026-08-14 Runtime warning remediation execution
 

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-14T04:35:53.358132+00:00",
+  "generated_at": "2026-08-17T02:52:21.442407+00:00",
   "gate": "standard_v2_p0",
   "status": "passed",
   "formal_24h_launch_allowed": false,
@@ -34,15 +34,15 @@
         "aligned": {
           "00003": {
             "role": "COO",
-            "model": "claude-opus-5"
+            "model": "gpt-5.6-sol"
           },
           "00006": {
             "role": "Senior Backend Engineer",
-            "model": "claude-opus-5"
+            "model": "gpt-5.6-sol"
           },
           "00007": {
             "role": "Full-Stack Engineer",
-            "model": "claude-sonnet-5"
+            "model": "gpt-5.6-sol"
           },
           "00008": {
             "role": "DevOps/SRE Engineer",
@@ -50,11 +50,11 @@
           },
           "00009": {
             "role": "QA Lead",
-            "model": "claude-sonnet-5"
+            "model": "gpt-5.6-sol"
           },
           "00010": {
             "role": "Tech Lead",
-            "model": "claude-fable-5"
+            "model": "gpt-5.6-sol"
           },
           "00011": {
             "role": "Mid-level Backend Engineer",
@@ -71,7 +71,7 @@
       "name": "atomic_work_principles",
       "status": "passed",
       "detail": {
-        "revision": "24h-v2-20260813T160434Z",
+        "revision": "24h-v2-20260817T025121Z",
         "employees": [
           "00002",
           "00003",
@@ -136,10 +136,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "25 passed in 1.03s",
+      "summary": "41 passed in 2.07s",
       "output_tail": [
-        ".........................                                                [100%]",
-        "25 passed in 1.03s"
+        ".........................................                                [100%]",
+        "41 passed in 2.07s"
       ]
     },
     {
@@ -155,10 +155,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "4 passed in 0.97s",
+      "summary": "6 passed in 1.20s",
       "output_tail": [
-        "....                                                                     [100%]",
-        "4 passed in 0.97s"
+        "......                                                                   [100%]",
+        "6 passed in 1.20s"
       ]
     },
     {
@@ -175,10 +175,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "10 passed in 0.58s",
+      "summary": "19 passed in 6.06s",
       "output_tail": [
-        "..........                                                               [100%]",
-        "10 passed in 0.58s"
+        "...................                                                      [100%]",
+        "19 passed in 6.06s"
       ]
     },
     {
@@ -196,10 +196,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "21 passed in 1.34s",
+      "summary": "24 passed in 1.95s",
       "output_tail": [
-        ".....................                                                    [100%]",
-        "21 passed in 1.34s"
+        "........................                                                 [100%]",
+        "24 passed in 1.95s"
       ]
     },
     {
@@ -214,10 +214,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "5 passed in 0.79s",
+      "summary": "5 passed in 0.96s",
       "output_tail": [
         ".....                                                                    [100%]",
-        "5 passed in 0.79s"
+        "5 passed in 0.96s"
       ]
     },
     {
@@ -235,10 +235,10 @@
         "--timeout=30"
       ],
       "returncode": 0,
-      "summary": "4 passed in 1.95s",
+      "summary": "4 passed in 2.46s",
       "output_tail": [
         "....                                                                     [100%]",
-        "4 passed in 1.95s"
+        "4 passed in 2.46s"
       ]
     },
     {

@@ -1,9 +1,9 @@
 # OneManCompany 24 小时持续运行、可恢复执行与长期记忆实施计划
 
-> 版本：3.8
-> 日期：2026-08-14  
-> 目标架构：SQLite + LangGraph AsyncSqliteSaver + AsyncSqliteStore/sqlite-vec + TaskTree standard v2  
-> 当前状态：实施中；尚未满足正式启动 24 小时模式的条件
+> 版本：3.12
+> 日期：2026-08-17
+> 目标架构：SQLite + LangGraph AsyncSqliteSaver + AsyncSqliteStore/sqlite-vec + TaskTree standard v2
+> 当前状态：24 小时墙钟 Gate 和 OneManCompany 真实服务 Smoke 已通过；已批准将所有 Claude 系列正式员工模型统一迁移到 `gpt-5.6-sol`。`iter_019` 保留旧模型基线，不得继续复用；服务恢复后应正式中止并创建全新 standard v2 iteration。
 
 ---
 
@@ -134,10 +134,11 @@
 - legacy `iter_009.yaml` 与目录化 `iter_009/task_tree.yaml` 已分别建立哈希基线，本轮前后同时保持不变；
 - 本地 Ollama Embedding、worker pending/backoff/recovery 和 Provider 让位 Gate 均已通过；
 - Online Backup 到独立 data root 的 TaskTree/checkpoint/receipt/ledger/outbox/acceptance 只读对账已通过；
-- 24 小时墙钟 supervisor、隔离备份、监控和故障调度已实现并于 2026-08-15 13:24:57 启动真实 86,400 秒运行；仍缺少运行完成结论、真机 smoke、FFmpeg/FFprobe 证据和最终四人 standard v2 正式复验；
-- 全新 standard v2 iteration 的四人正式复验与显式验收。
+- 真实 24 小时墙钟 Gate 已于 2026-08-16 13:24:57 Asia/Shanghai 完成并通过：连续运行 86,400.263 秒、1,437 次监控采样，Provider 429、Embedding 不可用、后端重启和 SQLite lock 四类故障全部通过，11 项最终检查全部为 true；
+- OneManCompany 当前版本真实服务 Smoke 已通过：后端/前端与核心 API HTTP 200，正式员工和 automation 可加载，RuntimeStorage、checkpoint、memory、sqlite-vec、Embedding 与 ProviderGateway 全部健康，SQLite 完整且服务干净关闭；
+- 全新四人 standard v2 iteration 的正式任务、COO 显式验收和最终 Closure Gate。
 
-**当前结论：** P0 和隔离 Recovery Gate 已通过，但 `formal_24h_launch_allowed=false`。不得把隔离 subprocess、隔离服务或单元测试结果写成正式业务上线。
+**当前结论：** P0、长期记忆、Provider 429、服务恢复、独立只读恢复和真实 24 小时墙钟 Gate 均已通过；24 小时 Gate 报告自身给出 `formal_24h_launch_allowed=true`。项目尚未正式上线，因为全新四人 standard v2 iteration、COO 显式验收和最终 Closure Gate 仍未完成。Android/ADB、FFmpeg/FFprobe 和 cloud-test-platform 不属于本项目当前上线 Gate。
 
 ## 3. 目标架构和权威边界
 
@@ -751,12 +752,12 @@ Worker 必须使用 claim/lease，防止进程重启或重复 worker 双写。
 
 | 员工 | 目标角色 | 目标部门 | 目标模型 | 汇报/协作关系 | 操作 |
 |---|---|---|---|---|---|
-| 00003 | COO | Operations | `claude-opus-5` | 向 CEO 汇报，调度全员 | 修改模型并复核权限 |
-| 00006 | Senior Backend Engineer / Alpha Lead | Engineering | `claude-opus-5` | 审查 00011，和 00007 联调 | 修改角色、名称/职级、技能、权限、模型 |
-| 00007 | Full-Stack Engineer | Engineering | `claude-sonnet-5` | 与 00006 联调，接收 00009 缺陷 | 修改模型并清理旧 API Tester 身份残留 |
+| 00003 | COO | Operations | `gpt-5.6-sol` | 向 CEO 汇报，调度全员 | 修改模型并复核权限 |
+| 00006 | Senior Backend Engineer / Alpha Lead | Engineering | `gpt-5.6-sol` | 审查 00011，和 00007 联调 | 修改角色、名称/职级、技能、权限、模型 |
+| 00007 | Full-Stack Engineer | Engineering | `gpt-5.6-sol` | 与 00006 联调，接收 00009 缺陷 | 修改模型并清理旧 API Tester 身份残留 |
 | 00008 | DevOps/SRE | Operations | `gpt-5.6-sol` | 负责部署、监控、备份和恢复 | 对齐部门/角色显示并复核高风险工具权限 |
-| 00009 | QA Lead | Quality Assurance | `claude-sonnet-5` | 管理 00012，负责正式质量 Gate | 修改角色、部门、技能、权限和模型 |
-| 00010 | Tech Lead | Engineering | `claude-fable-5` | 技术升级入口，不承担 Project Manager 身份 | 修改角色、名称/职级、技能、权限、模型 |
+| 00009 | QA Lead | Quality Assurance | `gpt-5.6-sol` | 管理 00012，负责正式质量 Gate | 修改角色、部门、技能、权限和模型 |
+| 00010 | Tech Lead | Engineering | `gpt-5.6-sol` | 技术升级入口，不承担 Project Manager 身份 | 修改角色、名称/职级、技能、权限、模型 |
 | 00011 | Mid Backend Engineer | Engineering | `gpt-5.6-sol` | 向 00006 汇报 | 正式 onboarding 新建 |
 | 00012 | Automation Test Engineer | Quality Assurance | `gpt-5.6-sol` | 向 00009 汇报 | 正式 onboarding 新建 |
 
@@ -1332,8 +1333,8 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 - 12 人团队实际配置与文档一致，或文档已按实际团队修订；
 - 自动化任务已注册、可审计且幂等；
 - 24 小时墙钟故障注入通过；
-- 唯一实施路径 `/Users/hanzhen/Documents/云测试的项目` 通过核验；
-- FFmpeg/FFprobe 和真机 smoke 产生真实证据；
+- OneManCompany 仓库、正式 data root 与受保护状态边界通过核验；
+- OneManCompany 后端、API、员工配置、automation、RuntimeStorage、checkpoint、memory 与 TaskTree 真实服务 smoke 产生可审计证据；
 - `iter_009` 未被修改。
 
 ---
@@ -1387,10 +1388,13 @@ Runtime/Checkpoint 与长期记忆的 Phase 2—5 可以在不修改同一写集
 
 ### P2：运营验收
 
-1. **运行中：** 完整 24 小时墙钟故障注入（2026-08-15 13:24:57 至最早 2026-08-16 13:24:57）；运行根、故障计划和恢复命令见 `reports/WALL-CLOCK-GATE-RUN-20260815.md`；
-2. 真机 smoke、FFmpeg/FFprobe 和设备证据；
-3. 创建全新 standard v2 iteration，完成四人正式复验；
-4. 确认所有子任务由真实 `accept_child()`/`reject_child()` 决定，Closure Gate 不接受 Auto-accepted 或记忆结论；
-5. 生成最终恢复、Provider、automation、memory、成本和 Closure Gate 报告。
+1. **已完成：** 真实 24 小时墙钟故障注入于 2026-08-16 13:24:57 通过；最终结果见 `reports/WALL-CLOCK-GATE-FINAL-20260816.md`；
+2. **已完成：** OneManCompany 当前版本真实服务 Smoke 已通过，后端/前端/API、员工配置、automation、RuntimeStorage、checkpoint、memory、sqlite-vec、Embedding、ProviderGateway、SQLite 完整性和 clean shutdown 均有隔离真实服务证据；结果见 `reports/REAL-SERVICE-SMOKE-20260816.md`；
+3. **已执行但未通过：** `iter_017` 暴露 self-hosted executor 没有真实 SQLite checkpoint 行；COO 已正式拒绝，证据保留并通过 API 中止，禁止修补或重用；
+4. **已完成代码修复：** formal v2 self-hosted executor 在独立 `omc_execution` namespace、进入 executor body 前写入 execution checkpoint；失败时转 `holding/checkpoint_backend_unavailable`；定向测试 `37 passed`，完整测试 `4734 passed, 5 skipped, 73 warnings`；
+5. `iter_017` 因真实 execution checkpoint 缺失正式失败并中止；`iter_018` 因相同 task_key 的参数冲突正式失败并中止，二者均保留原始证据且不得修补或重用；
+6. **已批准模型迁移：** `00003`、`00005`、`00006`、`00007`、`00009`、`00010` 从 Claude 系列统一改为 `gpt-5.6-sol`；`iter_019` 保留旧模型基线，服务恢复后必须正式中止，不得沿旧 thread 混用新模型；随后创建全新 standard v2 iteration；
+7. 确认 COO 对四个 child 显式调用 `accept_child()`/`reject_child()`，EA 对 COO formal parent 作显式决定，Closure Gate 不接受 Auto-accepted 或记忆结论；
+8. 生成最终 checkpoint、dispatch、acceptance、memory 和 Closure Gate 报告。
 
-**当前状态：实施中，尚未正式上线；`formal_24h_launch_allowed=false`。**
+**当前状态：24 小时墙钟 Gate 和 OneManCompany 真实服务 Smoke 已通过；已批准并应用全体 Claude 系列员工向 `gpt-5.6-sol` 的正式配置迁移。`iter_019` 属于旧模型执行基线，服务恢复后必须通过正式 API 中止并保留证据，再创建全新 standard v2 iteration。新 iteration 完成 COO/EA 显式验收和 Closure Gate 前不得标记正式上线。**

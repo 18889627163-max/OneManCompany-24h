@@ -158,7 +158,7 @@ OneManCompany-main/
 **[00003-coo-work-principles.md](../employee-work-principles/00003-coo-work-principles.md)**
 ```yaml
 角色: COO - 24/7调度中枢
-模型: claude-opus-5
+模型: gpt-5.6-sol
 长度: 约150行
 重点内容:
   - 24/7自动调度策略
@@ -171,7 +171,7 @@ OneManCompany-main/
 **[00010-tech-lead-work-principles.md](../employee-work-principles/00010-tech-lead-work-principles.md)**
 ```yaml
 角色: Tech Lead - 技术领导者
-模型: claude-fable-5
+模型: gpt-5.6-sol
 长度: 约120行
 重点内容:
   - 架构设计方法
@@ -185,7 +185,7 @@ OneManCompany-main/
 **[00006-senior-backend-work-principles.md](../employee-work-principles/00006-senior-backend-work-principles.md)**
 ```yaml
 角色: 高级后端工程师（Alpha队长）
-模型: claude-opus-5
+模型: gpt-5.6-sol
 长度: 约180行
 重点内容:
   - 核心API开发（设备、任务、认证）
@@ -209,7 +209,7 @@ OneManCompany-main/
 **[00007-fullstack-work-principles.md](../employee-work-principles/00007-fullstack-work-principles.md)**
 ```yaml
 角色: 全栈工程师
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 长度: 约160行
 重点内容:
   - React/Vue组件开发
@@ -236,7 +236,7 @@ OneManCompany-main/
 **[00009-qa-lead-work-principles.md](../employee-work-principles/00009-qa-lead-work-principles.md)**
 ```yaml
 角色: QA Lead
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 长度: 约170行
 重点内容:
   - 测试策略和计划
@@ -283,7 +283,7 @@ OneManCompany-main/
 **[00005-cso-work-principles.md](../employee-work-principles/00005-cso-work-principles.md)**
 ```yaml
 角色: CSO
-模型: claude-sonnet-5
+模型: gpt-5.6-sol
 长度: 约50行
 重点内容: 客户关系、产品推广、商务支持
 ```

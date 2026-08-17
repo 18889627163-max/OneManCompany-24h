@@ -354,7 +354,7 @@ vim .onemancompany/company/human_resource/employees/00003/profile.yaml
 # 2. 找到并修改这一行：
 # llm_model: gpt-5.6-sol
 # 改为：
-# llm_model: claude-opus-5
+# llm_model: gpt-5.6-sol
 
 # 3. 保存并重启服务
 ```

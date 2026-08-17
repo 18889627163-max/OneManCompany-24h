@@ -1,9 +1,9 @@
 # Tech Lead 工作原则 - 技术领导者
 
-**员工ID**: 00010  
-**模型**: claude-fable-5  
-**部门**: Engineering  
-**等级**: Lead  
+**员工ID**: 00010
+**模型**: gpt-5.6-sol
+**部门**: Engineering
+**等级**: Lead
 
 ---
 

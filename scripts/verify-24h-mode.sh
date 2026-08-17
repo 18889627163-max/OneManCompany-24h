@@ -222,9 +222,9 @@ check_employee_model() {
     fi
 }
 
-check_employee_model "00003" "claude-opus-5"
-check_employee_model "00006" "claude-opus-5"
-check_employee_model "00010" "claude-fable-5"
+check_employee_model "00003" "gpt-5.6-sol"
+check_employee_model "00006" "gpt-5.6-sol"
+check_employee_model "00010" "gpt-5.6-sol"
 
 echo ""
 

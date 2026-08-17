@@ -190,29 +190,29 @@ EOF
 
 **00003 - COO**:
 - 当前模型: `gpt-5.6-sol`
-- 目标模型: `claude-opus-5` ❌
+- 目标模型: `gpt-5.6-sol` ❌
 
 **00006 - 高级后端**:
 - 当前角色: Full-Stack Engineer
 - 目标角色: Senior Backend Engineer ❌
 - 当前模型: `deepseek-v4-flash`
-- 目标模型: `claude-opus-5` ❌
+- 目标模型: `gpt-5.6-sol` ❌
 
 **00007 - 全栈**:
 - 当前模型: `deepseek-v4-flash`
-- 目标模型: `claude-sonnet-5` ❌
+- 目标模型: `gpt-5.6-sol` ❌
 
 **00009 - QA Lead**:
 - 当前角色: QA Engineer
 - 目标角色: QA Lead ❌
 - 当前模型: `deepseek-v4-flash`
-- 目标模型: `claude-sonnet-5` ❌
+- 目标模型: `gpt-5.6-sol` ❌
 
 **00010 - Tech Lead**:
 - 当前角色: Project Manager
 - 目标角色: Tech Lead ❌
 - 当前模型: `deepseek-v4-flash`
-- 目标模型: `claude-fable-5` ❌
+- 目标模型: `gpt-5.6-sol` ❌
 
 ### 2. 创建新员工（P0）
 

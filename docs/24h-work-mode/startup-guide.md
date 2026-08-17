@@ -171,27 +171,27 @@ test -d .onemancompany/company/human_resource/employees/00012 && echo "✅ 00012
 1. **00003 (COO)**
    - 点击 COO 头像
    - 找到 "LLM 配置" → "当前模型"
-   - 改为：`claude-opus-5`
+   - 改为：`gpt-5.6-sol`
    - 保存
 
 2. **00006 (全栈 → 高级后端)**
    - 点击员工头像
    - 修改职位：`高级后端工程师`
-   - 修改模型：`claude-opus-5`
+   - 修改模型：`gpt-5.6-sol`
    - 保存
 
 3. **00007 (API Tester → 全栈)**
    - 修改职位：`全栈工程师`
-   - 修改模型：`claude-sonnet-5`
+   - 修改模型：`gpt-5.6-sol`
    - 保存
 
 4. **00009 (QA)**
-   - 修改模型：`claude-sonnet-5`
+   - 修改模型：`gpt-5.6-sol`
    - 保存
 
 5. **00010 (项目经理 → Tech Lead)**
    - 修改职位：`Tech Lead`
-   - 修改模型：`claude-fable-5`
+   - 修改模型：`gpt-5.6-sol`
    - 保存
 
 ### 3.2 通过命令行修改（高级）
@@ -200,27 +200,27 @@ test -d .onemancompany/company/human_resource/employees/00012 && echo "✅ 00012
 
 ```bash
 # 00003 (COO)
-sed -i '' 's/llm_model: .*/llm_model: claude-opus-5/' \
+sed -i '' 's/llm_model: .*/llm_model: gpt-5.6-sol/' \
   .onemancompany/company/human_resource/employees/00003/profile.yaml
 
 # 00006 (高级后端)
-sed -i '' 's/llm_model: .*/llm_model: claude-opus-5/' \
+sed -i '' 's/llm_model: .*/llm_model: gpt-5.6-sol/' \
   .onemancompany/company/human_resource/employees/00006/profile.yaml
 sed -i '' 's/role: .*/role: Senior Backend Engineer/' \
   .onemancompany/company/human_resource/employees/00006/profile.yaml
 
 # 00007 (全栈)
-sed -i '' 's/llm_model: .*/llm_model: claude-sonnet-5/' \
+sed -i '' 's/llm_model: .*/llm_model: gpt-5.6-sol/' \
   .onemancompany/company/human_resource/employees/00007/profile.yaml
 sed -i '' 's/role: .*/role: Full-stack Engineer/' \
   .onemancompany/company/human_resource/employees/00007/profile.yaml
 
 # 00009 (QA)
-sed -i '' 's/llm_model: .*/llm_model: claude-sonnet-5/' \
+sed -i '' 's/llm_model: .*/llm_model: gpt-5.6-sol/' \
   .onemancompany/company/human_resource/employees/00009/profile.yaml
 
 # 00010 (Tech Lead)
-sed -i '' 's/llm_model: .*/llm_model: claude-fable-5/' \
+sed -i '' 's/llm_model: .*/llm_model: gpt-5.6-sol/' \
   .onemancompany/company/human_resource/employees/00010/profile.yaml
 sed -i '' 's/role: .*/role: Tech Lead/' \
   .onemancompany/company/human_resource/employees/00010/profile.yaml
@@ -235,11 +235,11 @@ echo "✅ 模型配置完成"
 grep "llm_model" .onemancompany/company/human_resource/employees/*/profile.yaml
 
 # 应该看到：
-# 00003/profile.yaml:llm_model: claude-opus-5
-# 00006/profile.yaml:llm_model: claude-opus-5
-# 00007/profile.yaml:llm_model: claude-sonnet-5
-# 00009/profile.yaml:llm_model: claude-sonnet-5
-# 00010/profile.yaml:llm_model: claude-fable-5
+# 00003/profile.yaml:llm_model: gpt-5.6-sol
+# 00006/profile.yaml:llm_model: gpt-5.6-sol
+# 00007/profile.yaml:llm_model: gpt-5.6-sol
+# 00009/profile.yaml:llm_model: gpt-5.6-sol
+# 00010/profile.yaml:llm_model: gpt-5.6-sol
 # 00011/profile.yaml:llm_model: gpt-5.6-sol
 # 00012/profile.yaml:llm_model: gpt-5.6-sol
 ```
@@ -446,23 +446,23 @@ EA（00004）处理报告：
 ### 团队配置（12人）
 
 指挥层：
-- 00003 COO (claude-opus-5) - 24/7自动调度
-- 00010 Tech Lead (claude-fable-5) - 按需工作
+- 00003 COO (gpt-5.6-sol) - 24/7自动调度
+- 00010 Tech Lead (gpt-5.6-sol) - 按需工作
 
 核心工程：
-- 00006 高级后端 (claude-opus-5) - 24/7开发
+- 00006 高级后端 (gpt-5.6-sol) - 24/7开发
 - 00011 中级后端 (gpt-5.6-sol) - 24/7开发
-- 00007 全栈 (claude-sonnet-5) - 24/7开发
+- 00007 全栈 (gpt-5.6-sol) - 24/7开发
 - 00008 DevOps (gpt-5.6-sol) - 24/7监控
 
 质量保障：
-- 00009 QA Lead (claude-sonnet-5) - 24/7测试
+- 00009 QA Lead (gpt-5.6-sol) - 24/7测试
 - 00012 自动化测试 (gpt-5.6-sol) - 24/7测试
 
 支持层：
 - 00002 HR (deepseek-v4-flash) - 按需
 - 00004 EA (gpt-5.6-sol) - 白天
-- 00005 CSO (claude-sonnet-5) - 按需
+- 00005 CSO (gpt-5.6-sol) - 按需
 
 ### 项目目标
 - 项目周期：31天

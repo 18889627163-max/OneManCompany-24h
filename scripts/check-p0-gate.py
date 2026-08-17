@@ -67,12 +67,12 @@ TEST_GROUPS: dict[str, list[str]] = {
 }
 
 EXPECTED_EMPLOYEES = {
-    "00003": ("COO", "claude-opus-5"),
-    "00006": ("Senior Backend Engineer", "claude-opus-5"),
-    "00007": ("Full-Stack Engineer", "claude-sonnet-5"),
+    "00003": ("COO", "gpt-5.6-sol"),
+    "00006": ("Senior Backend Engineer", "gpt-5.6-sol"),
+    "00007": ("Full-Stack Engineer", "gpt-5.6-sol"),
     "00008": ("DevOps/SRE Engineer", "gpt-5.6-sol"),
-    "00009": ("QA Lead", "claude-sonnet-5"),
-    "00010": ("Tech Lead", "claude-fable-5"),
+    "00009": ("QA Lead", "gpt-5.6-sol"),
+    "00010": ("Tech Lead", "gpt-5.6-sol"),
     "00011": ("Mid-level Backend Engineer", "gpt-5.6-sol"),
     "00012": ("Automation Test Engineer", "gpt-5.6-sol"),
 }

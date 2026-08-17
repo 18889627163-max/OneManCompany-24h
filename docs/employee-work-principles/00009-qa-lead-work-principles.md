@@ -1,7 +1,7 @@
 # QA Lead 工作原则
 
-**员工ID**: 00009  
-**模型**: claude-sonnet-5  
+**员工ID**: 00009
+**模型**: gpt-5.6-sol
 **部门**: Quality Assurance
 
 ---

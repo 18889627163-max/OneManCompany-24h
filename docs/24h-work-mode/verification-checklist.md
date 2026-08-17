@@ -58,9 +58,9 @@
 
 - [ ] **00003 - COO**
   - 存在：✅
-  - 模型：claude-opus-5 ⭐
+  - 模型：gpt-5.6-sol ⭐
   - 工作原则：24/7自动调度
-  - 验证：`grep "claude-opus-5" .onemancompany/company/human_resource/employees/00003/profile.yaml`
+  - 验证：`grep "gpt-5.6-sol" .onemancompany/company/human_resource/employees/00003/profile.yaml`
 
 - [ ] **00004 - EA**
   - 存在：✅
@@ -69,19 +69,19 @@
 
 - [ ] **00005 - CSO**
   - 存在：✅
-  - 模型：claude-sonnet-5
+  - 模型：gpt-5.6-sol
   - 工作原则：客户关系
 
 - [ ] **00006 - 高级后端工程师**
   - 存在：✅
-  - 模型：claude-opus-5 ⭐
+  - 模型：gpt-5.6-sol ⭐
   - 角色：Senior Backend Engineer
   - 工作原则：核心API开发、24/7
-  - 验证：`grep "claude-opus-5" .onemancompany/company/human_resource/employees/00006/profile.yaml`
+  - 验证：`grep "gpt-5.6-sol" .onemancompany/company/human_resource/employees/00006/profile.yaml`
 
 - [ ] **00007 - 全栈工程师**
   - 存在：✅
-  - 模型：claude-sonnet-5 ⭐
+  - 模型：gpt-5.6-sol ⭐
   - 角色：Full-stack Engineer
   - 工作原则：前端+集成、24/7
 
@@ -92,12 +92,12 @@
 
 - [ ] **00009 - QA Lead**
   - 存在：✅
-  - 模型：claude-sonnet-5 ⭐
+  - 模型：gpt-5.6-sol ⭐
   - 工作原则：测试策略、8设备验收、24/7
 
 - [ ] **00010 - Tech Lead**
   - 存在：✅
-  - 模型：claude-fable-5 ⭐
+  - 模型：gpt-5.6-sol ⭐
   - 角色：Tech Lead（不是项目经理）
   - 工作原则：架构设计、难题攻关
 
